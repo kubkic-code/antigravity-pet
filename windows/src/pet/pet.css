@@ -1,0 +1,523 @@
+/* Pet & Shimeji CSS styles - Retro 8-bit aesthetic */
+
+.shimeji-container {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: visible;
+  user-select: none;
+  -webkit-user-select: none;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace, sans-serif;
+}
+
+.pet-actor {
+  position: absolute;
+  width: 96px;
+  height: 96px;
+  pointer-events: auto;
+  cursor: grab;
+  transform-origin: bottom center;
+  transition: transform 0.08s ease-out;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.pet-actor:active,
+.pet-actor.is-dragging {
+  cursor: grabbing;
+  transform: scale(1.08) translateY(-4px);
+}
+
+.pet-actor.facing-left .pet-canvas {
+  transform: scaleX(-1);
+}
+
+.pet-actor.facing-right .pet-canvas {
+  transform: scaleX(1);
+}
+
+.pet-canvas {
+  width: 80px;
+  height: 80px;
+  image-rendering: -moz-crisp-edges;
+  image-rendering: -webkit-crisp-edges;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  filter: drop-shadow(0 6px 12px rgba(0, 0, 0, 0.45)) drop-shadow(0 0 10px var(--pet-glow, rgba(255, 140, 26, 0.2)));
+  transition: filter 0.25s ease;
+}
+
+.pet-actor:hover .pet-canvas {
+  filter: drop-shadow(0 8px 16px rgba(0, 0, 0, 0.55)) drop-shadow(0 0 16px var(--pet-glow, rgba(255, 140, 26, 0.45)));
+}
+
+/* ── Hover Greeting Animation (Hop & Playful Wiggle) ────────────────────────── */
+.pet-actor.is-greeting .pet-canvas {
+  animation: petGreetHop 0.65s cubic-bezier(0.25, 1, 0.5, 1) !important;
+}
+
+@keyframes petGreetHop {
+  0% {
+    translate: 0 0;
+    rotate: 0deg;
+    scale: 1 1;
+  }
+  18% {
+    translate: 0 3px;
+    rotate: -4deg;
+    scale: 1.1 0.92;
+  }
+  45% {
+    translate: 0 -16px;
+    rotate: 8deg;
+    scale: 0.94 1.1;
+  }
+  72% {
+    translate: 0 -3px;
+    rotate: -3deg;
+    scale: 1.04 0.98;
+  }
+  88% {
+    translate: 0 1px;
+    rotate: 1deg;
+    scale: 0.99 1.01;
+  }
+  100% {
+    translate: 0 0;
+    rotate: 0deg;
+    scale: 1 1;
+  }
+}
+
+.pet-actor.is-greeting .pet-shadow {
+  animation: petGreetShadow 0.65s cubic-bezier(0.25, 1, 0.5, 1) !important;
+}
+
+@keyframes petGreetShadow {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.4;
+  }
+  18% {
+    transform: scale(1.15);
+    opacity: 0.55;
+  }
+  45% {
+    transform: scale(0.6);
+    opacity: 0.2;
+  }
+  72% {
+    transform: scale(0.95);
+    opacity: 0.38;
+  }
+}
+
+
+.pet-actor.state-idle:not(.is-dragging) .pet-canvas {
+  animation: petIdleBreathe 3.2s ease-in-out infinite;
+}
+
+@keyframes petIdleBreathe {
+  0%, 100% {
+    translate: 0 0;
+  }
+  50% {
+    translate: 0 -2.5px;
+  }
+}
+
+/* Autonomous Fun Animations */
+.pet-actor.state-dance:not(.is-dragging) .pet-canvas {
+  animation: petDanceGroove 0.52s ease-in-out infinite;
+}
+
+@keyframes petDanceGroove {
+  0%, 100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  25% {
+    transform: translateY(-4px) rotate(-4deg);
+  }
+  50% {
+    transform: translateY(0) rotate(0deg);
+  }
+  75% {
+    transform: translateY(-4px) rotate(4deg);
+  }
+}
+
+.pet-actor.state-sleep:not(.is-dragging) .pet-canvas {
+  animation: petSleepSway 2.6s ease-in-out infinite;
+  filter: brightness(0.92) drop-shadow(0 4px 8px rgba(0, 0, 0, 0.4));
+}
+
+@keyframes petSleepSway {
+  0%, 100% {
+    transform: translateY(0) scaleY(1);
+  }
+  50% {
+    transform: translateY(2.5px) scaleY(0.95);
+  }
+}
+
+.pet-actor.state-coffee:not(.is-dragging) .pet-canvas {
+  animation: petCoffeeSip 2.2s ease-in-out infinite;
+}
+
+@keyframes petCoffeeSip {
+  0%, 100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  40%, 60% {
+    transform: translateY(-2px) rotate(-3deg);
+  }
+}
+
+.pet-actor.state-stretch:not(.is-dragging) .pet-canvas {
+  animation: petStretchGym 1.8s ease-in-out infinite;
+}
+
+@keyframes petStretchGym {
+  0%, 100% {
+    transform: scale(1, 1);
+  }
+  30% {
+    transform: scale(1.08, 0.88) translateY(3px);
+  }
+  65% {
+    transform: scale(0.92, 1.14) translateY(-6px);
+  }
+}
+
+.pet-actor.state-snack:not(.is-dragging) .pet-canvas {
+  animation: petSnackMunch 0.55s ease-in-out infinite;
+}
+
+@keyframes petSnackMunch {
+  0%, 100% {
+    transform: translateY(0) scale(1);
+  }
+  25% {
+    transform: translateY(-2px) scale(1.04, 0.96);
+  }
+  50% {
+    transform: translateY(0) scale(0.97, 1.03);
+  }
+  75% {
+    transform: translateY(-1.5px) scale(1.03, 0.97);
+  }
+}
+
+.pet-shadow {
+  width: 52px;
+  height: 8px;
+  background: radial-gradient(ellipse at center, rgba(0, 0, 0, 0.5) 0%, rgba(0, 0, 0, 0) 75%);
+  border-radius: 50%;
+  margin-top: -4px;
+  pointer-events: none;
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+
+.pet-actor.is-dragging .pet-shadow {
+  transform: scale(0.65);
+  opacity: 0.25;
+}
+
+/* Floating speech / thought bubble */
+.pet-bubble {
+  position: absolute;
+  bottom: 84px;
+  left: 50%;
+  transform: translateX(-50%) translateY(0);
+  background: rgba(18, 22, 34, 0.94);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 12px;
+  padding: 6px 12px 7px 12px;
+  color: #f3f4f6;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.35;
+  width: max-content;
+  min-width: 140px;
+  max-width: 270px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5), 0 0 12px rgba(56, 189, 248, 0.2);
+  pointer-events: auto;
+  opacity: 0;
+  transition: opacity 0.2s ease, transform 0.2s cubic-bezier(0.18, 0.89, 0.32, 1.28);
+  z-index: 100;
+}
+
+.pet-bubble.is-visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(-6px);
+}
+
+.pet-bubble::after {
+  content: "";
+  position: absolute;
+  bottom: -6px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 6px solid rgba(18, 22, 34, 0.94);
+}
+
+.pet-bubble-title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #94a3b8;
+  margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pet-bubble-title .status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #38bdf8;
+  display: inline-block;
+  box-shadow: 0 0 6px #38bdf8;
+  flex-shrink: 0;
+}
+
+.pet-bubble-title .status-dot.working {
+  background: #f59e0b;
+  box-shadow: 0 0 6px #f59e0b;
+  animation: pulse 1s infinite alternate;
+}
+
+.pet-bubble-title .status-dot.finished {
+  background: #10b981;
+  box-shadow: 0 0 6px #10b981;
+}
+
+.pet-bubble-title .status-dot.error {
+  background: #ef4444;
+  box-shadow: 0 0 6px #ef4444;
+}
+
+.pet-bubble-body {
+  color: #f8fafc;
+  font-size: 11px;
+  line-height: 1.38;
+  white-space: normal;
+  word-break: normal;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Mascot name pill tag below mascot */
+.pet-tag {
+  position: absolute;
+  bottom: -10px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.94) 0%, rgba(30, 41, 59, 0.88) 100%);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 9999px;
+  padding: 2.5px 9px 2.5px 7px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 10px;
+  font-weight: 600;
+  color: #f8fafc;
+  white-space: nowrap;
+  letter-spacing: 0.35px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5), 0 0 10px var(--pet-glow, rgba(56, 189, 248, 0.25));
+  opacity: 0.92;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+  z-index: 10;
+}
+
+.pet-tag-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: inline-block;
+}
+
+.pet-tag-emoji {
+  font-size: 11px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.4));
+}
+
+.pet-tag-name {
+  background: linear-gradient(180deg, #ffffff 20%, #e2e8f0 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+
+.pet-tag-project {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 6px;
+  padding: 1px 6px;
+  font-size: 9px;
+  font-weight: 500;
+  color: #cbd5e1;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  letter-spacing: 0.2px;
+  transition: all 0.2s ease;
+}
+
+.pet-actor:hover .pet-tag-project {
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.35);
+  color: #ffffff;
+}
+
+.pet-actor:hover .pet-tag {
+  opacity: 1;
+  transform: translateX(-50%) translateY(-2px) scale(1.05);
+  border-color: rgba(255, 255, 255, 0.35);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.6), 0 0 14px var(--pet-glow, rgba(56, 189, 248, 0.45));
+}
+
+/* Sparkle particles for celebration / working */
+.pet-sparkle {
+  position: absolute;
+  pointer-events: none;
+  font-size: 12px;
+  animation: floatUp 0.8s ease-out forwards;
+}
+
+@keyframes pulse {
+  0% { opacity: 0.5; transform: scale(0.9); }
+  100% { opacity: 1; transform: scale(1.1); }
+}
+
+@keyframes floatUp {
+  0% {
+    opacity: 1;
+    transform: translateY(0) scale(0.5);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-30px) scale(1.2);
+  }
+}
+
+/* Ground shadow */
+.pet-shadow {
+  position: absolute;
+  bottom: 0px;
+  width: 48px;
+  height: 8px;
+  background: radial-gradient(ellipse at center, rgba(0, 0, 0, 0.4) 0%, rgba(0, 0, 0, 0) 75%);
+  border-radius: 50%;
+  pointer-events: none;
+  transition: transform 0.1s ease, opacity 0.1s ease;
+}
+
+/* ── Focus Mode (Režim soustředění) ────────────────────────────────────────── */
+.pet-actor.focus-mode {
+  cursor: pointer;
+  pointer-events: none;
+}
+
+.pet-actor.focus-mode .pet-canvas,
+.pet-actor.focus-mode .pet-shadow,
+.pet-actor.focus-mode .pet-bubble,
+.pet-actor.focus-mode .pet-tag {
+  opacity: 0 !important;
+  pointer-events: none !important;
+  visibility: hidden !important;
+}
+
+.focus-indicator {
+  display: none;
+  position: absolute;
+  bottom: -8px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 36px;
+  height: 5px;
+  border-radius: 9999px;
+  background: #64748b;
+  box-shadow: 0 0 10px rgba(100, 116, 139, 0.7), 0 1px 3px rgba(0, 0, 0, 0.5);
+  pointer-events: auto;
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  z-index: 50;
+}
+
+.pet-actor.focus-mode .focus-indicator {
+  display: block;
+}
+
+.pet-actor.focus-mode:hover .focus-indicator {
+  width: 52px;
+  height: 7px;
+  bottom: -9px;
+  filter: brightness(1.25);
+}
+
+/* State-based color glow for Focus Mode */
+.focus-indicator.status-idle {
+  background: #64748b;
+  box-shadow: 0 0 8px rgba(100, 116, 139, 0.7);
+}
+
+.focus-indicator.status-thinking {
+  background: #38bdf8;
+  box-shadow: 0 0 12px #38bdf8, 0 0 4px #38bdf8;
+  animation: pulseFocus 1.2s infinite alternate;
+}
+
+.focus-indicator.status-working {
+  background: #f59e0b;
+  box-shadow: 0 0 12px #f59e0b, 0 0 4px #f59e0b;
+  animation: pulseFocus 0.8s infinite alternate;
+}
+
+.focus-indicator.status-finished {
+  background: #10b981;
+  box-shadow: 0 0 14px #10b981, 0 0 5px #10b981;
+}
+
+.focus-indicator.status-error {
+  background: #ef4444;
+  box-shadow: 0 0 14px #ef4444, 0 0 5px #ef4444;
+  animation: pulseFocus 0.5s infinite alternate;
+}
+
+@keyframes pulseFocus {
+  0% { opacity: 0.6; transform: translateX(-50%) scaleX(0.85); }
+  100% { opacity: 1; transform: translateX(-50%) scaleX(1.15); }
+}
