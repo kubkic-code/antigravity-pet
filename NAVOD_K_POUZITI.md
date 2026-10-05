@@ -155,10 +155,16 @@ Okno chatu je přímým a kompletním mostem mezi vaší plochou a agentem v Ant
 2. Vpravo nahoře klikněte na ikonku **`📊`**.
 3. Zobrazí se panel s HWND okna, PID, stavem Named Pipe a živým proudem událostí, s možností jedním klikem zkopírovat report do schránky.
 
-### Kde najdu soubory a logy:
-- **Konfigurace hooků:** `C:\Users\<jméno>\.gemini\config\hooks.json`
-- **Hook relé binárka:** `%LOCALAPPDATA%\Coucou\bin\coucou-hook.exe`
-- **Logy aplikace:** `%LOCALAPPDATA%\Coucou\coucou.log`
+---
+
+## 🚀 Snadná instalace pro každého (i neprogramátory)
+
+Nemusíte nic programovat ani spouštět přes terminál:
+1. Přejděte na stránku **[Vydání na GitHubu (Releases)](https://github.com/kubkic-code/antigravity-pet/releases)**.
+2. Stáhněte si hotový instalační program **`AntigravityPet-Setup.exe`**.
+3. Spusťte stažený soubor a klikněte na **Instalovat** (nevyžaduje administrátorská práva, instaluje se čistě do profilu uživatele).
+4. *(Pokud Windows SmartScreen zobrazí modré upozornění o nepodepsaném souboru, klikněte na **Více informací → Spustit přesto**).*
+5. Spusťte aplikaci Antigravity Pet z nabídky Start nebo plochy — zvířátko se okamžitě objeví na spodní liště!
 
 ---
 

@@ -6,18 +6,15 @@ name: Windows
 on:
   push:
     tags:
+      - 'v*'
       - 'windows-v*'
   workflow_dispatch:
 
 permissions:
   contents: write
 
-# Publishing is paused: Defender flags the unsigned installer as
-# Trojan:Win32/Wacatac.H!ml (false positive, reported to Microsoft). Tags still
-# build, to check the app compiles, but nothing is uploaded. Set this back to
-# 'true' once the installer is signed or the detection is cleared.
 env:
-  PUBLISH: 'false'
+  PUBLISH: 'true'
 
 jobs:
   build:
@@ -52,10 +49,10 @@ jobs:
       # "0.1.1" that installs a 0.1.0 is the kind of thing nobody notices until
       # a bug report arrives against the wrong build.
       - name: Check the tag and every version agree
-        if: startsWith(github.ref, 'refs/tags/windows-v')
+        if: startsWith(github.ref, 'refs/tags/windows-v') || startsWith(github.ref, 'refs/tags/v')
         shell: pwsh
         run: |
-          $tag  = "${{ github.ref_name }}" -replace '^windows-v', ''
+          $tag  = "${{ github.ref_name }}" -replace '^(windows-)?v', ''
           $conf = (Get-Content src-tauri/tauri.conf.json | ConvertFrom-Json).version
           $pkg  = (Get-Content package.json | ConvertFrom-Json).version
           $cargo = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"(.+)"').Matches[0].Groups[1].Value
@@ -79,73 +76,64 @@ jobs:
           Get-ChildItem release | Format-Table Name, Length
 
       # Upload only on a manual run or when publishing a release.
-      # The repo is public, so artifacts are downloadable by any signed-in GitHub
-      # user; the condition keeps them off automatic tag builds while downloads
-      # are paused. retention-days: 3 limits exposure.
+      # The repo is public, so artifacts are downloadable by any signed-in GitHub user.
       - uses: actions/upload-artifact@v4
         if: github.event_name == 'workflow_dispatch' || env.PUBLISH == 'true'
         with:
-          name: Coucou-Windows-setup
-          path: windows/release/Coucou-Windows-${{ steps.pack.outputs.version }}-setup.exe
-          retention-days: 3
+          name: AntigravityPet-setup
+          path: windows/release/AntigravityPet-${{ steps.pack.outputs.version }}-setup.exe
+          retention-days: 7
 
-      # The unsigned NSIS installer is what Defender false-positives on, so the
-      # bare binaries go up as well. hooks.rs already falls back to looking for
-      # coucou-hook.exe next to coucou.exe, which is exactly this layout, so the
-      # portable pair runs with working Claude Code hooks and no installer.
+      # Bare portable binaries for users who prefer no installation
       - uses: actions/upload-artifact@v4
         if: github.event_name == 'workflow_dispatch' || env.PUBLISH == 'true'
         with:
-          name: Coucou-Windows-portable
+          name: AntigravityPet-portable
           path: |
             windows/target/release/coucou.exe
             windows/target/release/coucou-hook.exe
-          retention-days: 3
+          retention-days: 7
 
       - name: Publish the release
-        if: env.PUBLISH == 'true' && startsWith(github.ref, 'refs/tags/windows-v')
+        if: env.PUBLISH == 'true' && (startsWith(github.ref, 'refs/tags/windows-v') || startsWith(github.ref, 'refs/tags/v'))
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           $v = "${{ steps.pack.outputs.version }}"
           $notes = @"
-          Coucou for Windows $v — Mochi at the top of your screen.
+          ### 🐾 Antigravity Pet v$v (Windows 10/11)
+          Retro 8-bit Desktop Shimeji AI Companions for Google Antigravity IDE.
 
-          Download ``Coucou-Windows-$v-setup.exe`` and run it. The installer is not
-          code-signed yet, so Windows SmartScreen shows a warning: click
-          **More info → Run anyway**.
+          #### 🚀 Snadná instalace pro každého / Quick Install:
+          1. Stáhněte si instalátor ``AntigravityPet-$v-setup.exe`` níže.
+          2. Spusťte ho a klikněte na Instalovat (nevyžaduje administrátorská práva).
+          3. *(Pokud Windows SmartScreen zobrazí modré varování u nepodepsané aplikace, klikněte na **Více informací / More info → Spustit přesto / Run anyway**).*
+          4. Spusťte Antigravity Pet a vaše zvířátko se ihned objeví na liště IDE!
           "@
-          # --latest=false is not cosmetic: without it GitHub hands "Latest" to
-          # whichever release was published last, and the site's Download for Mac
-          # button points at /releases/latest. A Windows tag would silently send
-          # Mac users to the .exe. The macOS `v*` releases own that slot.
           gh release create "${{ github.ref_name }}" `
-            "release/Coucou-Windows-$v-setup.exe" `
-            --title "Coucou for Windows $v" `
+            "release/AntigravityPet-$v-setup.exe" `
+            --title "Antigravity Pet v$v" `
             --notes $notes `
-            --latest=false
+            --latest=true
 
-      - name: Update the rolling windows-latest release
-        if: env.PUBLISH == 'true' && startsWith(github.ref, 'refs/tags/windows-v')
+      - name: Update the rolling latest release
+        if: env.PUBLISH == 'true' && (startsWith(github.ref, 'refs/tags/windows-v') || startsWith(github.ref, 'refs/tags/v'))
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           $v = "${{ steps.pack.outputs.version }}"
-          $exists = gh release view windows-latest 2>$null
+          $exists = gh release view latest 2>$null
           if ($LASTEXITCODE -eq 0) {
-            # The tag has to follow the release, or windows-latest keeps pointing
-            # at the first commit it was ever created from and anyone building
-            # from it gets an old tree.
-            git tag -f windows-latest "${{ github.sha }}"
-            git push -f origin windows-latest
-            gh release edit windows-latest --title "Coucou for Windows (latest)" --notes "Always the newest Windows build — currently $v."
-            gh release upload windows-latest "release/Coucou-Windows-setup.exe" --clobber
+            git tag -f latest "${{ github.sha }}"
+            git push -f origin latest
+            gh release edit latest --title "Antigravity Pet (latest)" --notes "Always the newest Windows build — currently $v."
+            gh release upload latest "release/AntigravityPet-setup.exe" --clobber
           } else {
-            gh release create windows-latest `
-              "release/Coucou-Windows-setup.exe" `
-              --title "Coucou for Windows (latest)" `
+            gh release create latest `
+              "release/AntigravityPet-setup.exe" `
+              --title "Antigravity Pet (latest)" `
               --notes "Always the newest Windows build — currently $v." `
-              --latest=false
+              --latest=true
           }

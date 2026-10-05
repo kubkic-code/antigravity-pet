@@ -12,11 +12,18 @@
   <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License: MIT" />
 </p>
 
+<p align="center">
+  <a href="https://github.com/kubkic-code/antigravity-pet/releases">
+    <img src="https://img.shields.io/badge/Download-Windows%20Installer%20(.exe)-blue?style=for-the-badge&logo=windows" alt="Download Windows Installer" />
+  </a>
+</p>
+
 ---
 
 ## 📖 English & Czech Guides
 - **English Documentation:** [Read below](#-key-features)
 - **Česká uživatelská příručka:** [NAVOD_K_POUZITI.md](./NAVOD_K_POUZITI.md)
+- **Strategický & Marketingový Plán:** [MARKETING_PLAN.md](./MARKETING_PLAN.md)
 - **Master Developer & Handoff Guide:** [CLAUDE.md](./CLAUDE.md)
 
 ---
