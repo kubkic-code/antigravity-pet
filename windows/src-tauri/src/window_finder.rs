@@ -157,6 +157,31 @@ pub fn is_settings_window(title: &str, project_name: &str) -> bool {
     false
 }
 
+/// Returns true if the process is a known web browser, terminal, shell, or communication app.
+/// These must never be recognized as an Antigravity IDE window, even if their title mentions "antigravity".
+pub fn is_known_non_ide_process(lower_path: &str) -> bool {
+    let non_ide = [
+        "chrome.exe", "msedge.exe", "firefox.exe", "brave.exe", "opera.exe",
+        "vivaldi.exe", "arc.exe", "waterfox.exe", "tor.exe", "iexplore.exe",
+        "explorer.exe", "cmd.exe", "powershell.exe", "pwsh.exe", "windowsterminal.exe",
+        "slack.exe", "discord.exe", "teams.exe", "spotify.exe", "devenv.exe",
+    ];
+    non_ide.iter().any(|&p| lower_path.ends_with(p) || lower_path.contains(&format!("\\{p}")))
+}
+
+/// Returns true if the process is a supported IDE editor executable.
+pub fn is_ide_process(lower_path: &str) -> bool {
+    if is_known_non_ide_process(lower_path) {
+        return false;
+    }
+    lower_path.contains("antigravity")
+        || lower_path.ends_with("code.exe")
+        || lower_path.ends_with("cursor.exe")
+        || lower_path.ends_with("windsurf.exe")
+        || lower_path.ends_with("vscodium.exe")
+        || lower_path.ends_with("electron.exe")
+}
+
 /// Splits a window title by standard VS Code / Antigravity separators.
 /// Handles spaced separators (" - ", " — ", " – ", " | ") without splitting
 /// hyphenated project names like "coucou-main".
@@ -410,6 +435,11 @@ unsafe extern "system" fn enum_windows_callback(hwnd: HWND, lparam: LPARAM) -> B
     let lower_title = title.to_lowercase();
     let lower_class = class_name.to_lowercase();
 
+    // Reject non-IDE processes immediately (browsers, terminals, chats, etc.)
+    if !is_ide_process(&lower_path) {
+        return true.into();
+    }
+
     let mut score = 0i32;
 
     // Check target PID match if requested
@@ -421,9 +451,11 @@ unsafe extern "system" fn enum_windows_callback(hwnd: HWND, lparam: LPARAM) -> B
 
     // Process name checks
     let is_antigravity_proc = lower_path.contains("antigravity");
-    let is_vscode_proc = lower_path.contains("code.exe")
-        || lower_path.contains("cursor.exe")
-        || lower_path.contains("electron.exe");
+    let is_vscode_proc = lower_path.ends_with("code.exe")
+        || lower_path.ends_with("cursor.exe")
+        || lower_path.ends_with("windsurf.exe")
+        || lower_path.ends_with("vscodium.exe")
+        || lower_path.ends_with("electron.exe");
 
     if is_antigravity_proc {
         score += 80;
@@ -569,12 +601,19 @@ unsafe extern "system" fn enum_all_windows_callback(hwnd: HWND, lparam: LPARAM) 
     let lower_title = title.to_lowercase();
     let lower_class = class_name.to_lowercase();
 
+    // Reject non-IDE processes immediately (browsers, terminals, chats, etc.)
+    if !is_ide_process(&lower_path) {
+        return true.into();
+    }
+
     let mut score = 0i32;
 
     let is_antigravity_proc = lower_path.contains("antigravity");
-    let is_vscode_proc = lower_path.contains("code")
-        || lower_path.contains("cursor")
-        || lower_path.contains("electron");
+    let is_vscode_proc = lower_path.ends_with("code.exe")
+        || lower_path.ends_with("cursor.exe")
+        || lower_path.ends_with("windsurf.exe")
+        || lower_path.ends_with("vscodium.exe")
+        || lower_path.ends_with("electron.exe");
 
     if is_antigravity_proc {
         score += 80;
@@ -1043,6 +1082,21 @@ mod tests {
         assert!(!is_settings_window("minibagry - Antigravity IDE", "minibagry"));
         // An active project with settings tab open should still be considered the project, not standalone settings
         assert!(!is_settings_window("Settings - coucou-main - Antigravity IDE", "coucou-main"));
+    }
+
+    #[test]
+    fn test_is_ide_process_distinguishes_browsers_from_ides() {
+        // Browsers must always be rejected even if tab mentions Antigravity
+        assert!(!is_ide_process("c:\\program files\\google\\chrome\\application\\chrome.exe"));
+        assert!(!is_ide_process("c:\\program files (x86)\\microsoft\\edge\\application\\msedge.exe"));
+        assert!(!is_ide_process("c:\\program files\\mozilla firefox\\firefox.exe"));
+        assert!(!is_ide_process("c:\\windows\\explorer.exe"));
+
+        // IDE processes must be accepted
+        assert!(is_ide_process("c:\\users\\user\\appdata\\local\\programs\\antigravity ide\\antigravity ide.exe"));
+        assert!(is_ide_process("c:\\users\\user\\appdata\\local\\programs\\antigravity\\antigravity.exe"));
+        assert!(is_ide_process("c:\\users\\user\\appdata\\local\\programs\\microsoft vs code\\code.exe"));
+        assert!(is_ide_process("c:\\users\\user\\appdata\\local\\programs\\cursor\\cursor.exe"));
     }
 }
 

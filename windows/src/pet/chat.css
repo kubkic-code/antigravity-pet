@@ -133,6 +133,9 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
 }
 
 .chat-avatar {
@@ -146,6 +149,7 @@
   cursor: pointer;
   transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1);
   user-select: none;
+  flex-shrink: 0;
 }
 
 .chat-avatar:hover {
@@ -159,6 +163,8 @@
 .chat-title-group {
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .chat-title {
@@ -168,12 +174,17 @@
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
 }
 
 .chat-subtitle {
   font-size: 9.5px;
   color: #94a3b8;
   letter-spacing: 0.2px;
+  max-width: 250px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .chat-project-badge {
@@ -215,6 +226,16 @@
   border-color: rgba(239, 68, 68, 0.6);
   color: #ffffff;
   transform: scale(1.1);
+}
+
+/* Body container for chat messages, settings and diagnostics */
+.chat-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 /* Messages stream */
@@ -586,7 +607,7 @@
 
 .chat-diagnostics-view {
   position: absolute;
-  top: 50px;
+  top: 0;
   left: 0;
   right: 0;
   bottom: 0;
@@ -698,7 +719,7 @@
 
 .chat-settings-view {
   position: absolute;
-  top: 50px;
+  top: 0;
   left: 0;
   right: 0;
   bottom: 0;

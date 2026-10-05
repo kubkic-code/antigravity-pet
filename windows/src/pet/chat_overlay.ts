@@ -205,12 +205,17 @@ export class ChatOverlay {
     inputBar.appendChild(this.inputEl);
     inputBar.appendChild(this.sendBtn);
 
+    const bodyEl = document.createElement("div");
+    bodyEl.className = "chat-body";
+
+    bodyEl.appendChild(this.messagesEl);
+    bodyEl.appendChild(this.diagnosticsEl);
+    bodyEl.appendChild(this.settingsEl);
+    bodyEl.appendChild(this.scrollDownBtn);
+    bodyEl.appendChild(inputBar);
+
     this.container.appendChild(headerEl);
-    this.container.appendChild(this.messagesEl);
-    this.container.appendChild(this.diagnosticsEl);
-    this.container.appendChild(this.settingsEl);
-    this.container.appendChild(this.scrollDownBtn);
-    this.container.appendChild(inputBar);
+    this.container.appendChild(bodyEl);
     parent.appendChild(this.container);
 
     this.setupEvents();
@@ -1227,9 +1232,11 @@ export class ChatOverlay {
     if (this.projectName) {
       this.titleEl.innerHTML = `<span>${animalName}</span> <span class="chat-project-badge" title="${this.escapeHtml(this.windowTitle || this.projectName)}">📁 ${this.escapeHtml(this.projectName)}</span>`;
       this.subtitleEl.textContent = `Propojeno s oknem: ${this.projectName}`;
+      this.subtitleEl.title = this.windowTitle || this.projectName;
     } else {
       this.titleEl.textContent = `${animalName} · IDE Mirror`;
       this.subtitleEl.textContent = "Obousměrné zrcadlo Antigravity";
+      this.subtitleEl.title = "Připraveno na události IDE";
     }
   }
 
