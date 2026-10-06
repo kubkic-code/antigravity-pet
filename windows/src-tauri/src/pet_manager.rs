@@ -27,6 +27,8 @@ pub struct PetSession {
     pub window_title: Option<String>,
     pub project_name: Option<String>,
     #[serde(skip)]
+    pub conversation_id: Arc<Mutex<Option<String>>>,
+    #[serde(skip)]
     pub hit_rect: Arc<Mutex<Option<(f64, f64, f64, f64)>>>,
     #[serde(skip)]
     pub ignoring: Arc<AtomicBool>,
@@ -81,6 +83,7 @@ impl PetManager {
                         cwd: cwd.map(String::from).or_else(|| existing.cwd.clone()),
                         window_title: title.map(String::from).or_else(|| existing.window_title.clone()),
                         project_name: Some(p.clone()),
+                        conversation_id: existing.conversation_id.clone(),
                         hit_rect: existing.hit_rect.clone(),
                         ignoring: existing.ignoring.clone(),
                     });
@@ -100,13 +103,50 @@ impl PetManager {
             return Some(existing.clone());
         }
 
-        // If a session already exists for this exact window handle, alias this new session_id to it!
+        // 1. If a session already exists for this exact window handle, alias this new session_id to it!
         if let Some(h) = hwnd {
             if let Some(existing) = guard.values().find(|s| s.hwnd == Some(h)).cloned() {
                 guard.insert(session_id.to_string(), existing.clone());
                 log::line(format!(
                     "aliased session='{}' to existing window pet session='{}' hwnd=0x{:X}",
                     session_id, existing.session_id, h
+                ));
+                return Some(existing);
+            }
+        }
+
+        // 2. If hwnd is None (e.g. from hook), match existing session by cwd, project_name, or single-pet fallback
+        if hwnd.is_none() {
+            let target_proj = title
+                .map(|t| crate::window_finder::extract_project_name(t, cwd))
+                .or_else(|| cwd.map(|c| crate::window_finder::extract_project_name("", Some(c))));
+
+            let matched = guard.values().find(|s| {
+                if let (Some(tp), Some(sp)) = (&target_proj, &s.project_name) {
+                    if tp.eq_ignore_ascii_case(sp) {
+                        return true;
+                    }
+                }
+                if let (Some(tc), Some(sc)) = (cwd, &s.cwd) {
+                    if tc.eq_ignore_ascii_case(sc) {
+                        return true;
+                    }
+                }
+                false
+            }).cloned().or_else(|| {
+                if guard.len() == 1 {
+                    guard.values().next().cloned()
+                } else {
+                    None
+                }
+            });
+
+            if let Some(existing) = matched {
+                *existing.conversation_id.lock().unwrap() = Some(session_id.to_string());
+                guard.insert(session_id.to_string(), existing.clone());
+                log::line(format!(
+                    "aliased hook session='{}' to existing window pet session='{}' (project={:?})",
+                    session_id, existing.session_id, existing.project_name
                 ));
                 return Some(existing);
             }
@@ -154,6 +194,7 @@ impl PetManager {
             cwd: cwd.map(|s| s.to_string()),
             window_title: title.map(|s| s.to_string()),
             project_name: Some(project_name.clone()),
+            conversation_id: Arc::new(Mutex::new(None)),
             hit_rect: Arc::new(Mutex::new(None)),
             ignoring: Arc::new(AtomicBool::new(false)),
         });
@@ -248,6 +289,7 @@ fn sync_active_ide_windows(app: &AppHandle) {
                     cwd: existing_sess.cwd.clone(),
                     window_title: Some(info.title.clone()),
                     project_name: Some(proj.clone()),
+                    conversation_id: existing_sess.conversation_id.clone(),
                     hit_rect: existing_sess.hit_rect.clone(),
                     ignoring: existing_sess.ignoring.clone(),
                 });
@@ -334,7 +376,10 @@ pub fn route_hook_event(app: &AppHandle, payload: &mut Value) {
     payload["projectName"] = json!(project_name);
 
     let manager = app.state::<PetManager>();
-    let _session = manager.ensure_session(app, &session_id, cwd.as_deref(), hwnd, None);
+    let session = manager.ensure_session(app, &session_id, cwd.as_deref(), hwnd, None);
+    if let Some(ref sess) = session {
+        *sess.conversation_id.lock().unwrap() = Some(session_id.clone());
+    }
 
     // Emit event globally to all listening pets
     let _ = app.emit("hook", &payload);

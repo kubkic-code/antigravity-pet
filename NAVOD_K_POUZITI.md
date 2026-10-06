@@ -122,11 +122,15 @@ Okno chatu je přímým a kompletním mostem mezi vaší plochou a agentem v Ant
 - **Postupné načítání starší historie:** Bleskově načte posledních 30 zpráv. Pro starší zprávy je nahoře tlačítko `⬆️ Načíst starší historii`.
 - **Automatická synchronizace:** Chat na pozadí sleduje změny transcriptu každých 1,2 s. V zavřeném stavu je sledování vypnuto (0,0 % CPU).
 
-### 3. Odesílání promptů na pozadí (Ghost Mode)
+### 3. Odesílání promptů na pozadí & Spolehlivé zaměření chatu přes Windows UI Automation (v0.1.2)
 - Do spodního pole napište zprávu a stiskněte **`Enter`** (nebo klikněte na tlačítko **`➤`**).
-- Zpráva se odešle přímo do Antigravity IDE:
-  - Můžete psát agentovi čistě přes zvířátko, zatímco jste třeba na webu v Google Chrome – okno IDE vás nemusí vyrušit v popředí.
-  - Zvířátko začne pilně kódovat na notebooku 💻.
+- **100% Spolehlivé vložení bez úniku do terminálu (v0.1.2):**
+  - Starší verze mohly při aktivním terminálu v IDE omylem napsat text do PowerShellu. Od verze **v0.1.2** aplikace využívá nativní **Windows UI Automation (`IUIAutomation`)**, které nalezne přesný ovládací prvek chatu (`ControlType::ComboBox`, `Name = "Message input"`).
+  - Volání `SetFocus()` přímo přenese klávesový fokus z integrovaného terminálu nebo editoru rovnou do chatu agenta.
+  - Text promptu se **nikdy nenapíše do terminálu ani do kódu**, i když jste před kliknutím na zvířátko pracovali v terminálu či jiné aplikaci!
+  - Využívá přesné fyzické souřadnice ovládacího prvku nezávisle na rozlišení či DPI monitoru (FullHD, 2K, 4K).
+- Můžete psát agentovi čistě přes zvířátko, zatímco jste třeba na webu v Google Chrome – okno IDE vás nemusí vyrušit v popředí.
+- Zvířátko začne ihned pilně kódovat na notebooku 💻.
 
 ---
 

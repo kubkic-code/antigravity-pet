@@ -1,3 +1,7 @@
+
+
+ahoj přečti si všechny md nejdřív. nějak mi nefunguje to napojení zvířátka na ten chat. poslal jsem neco zviratku ale do chatu se to nedostalo
+
 # 🚀 Marketingový Plán: Antigravity Pet (Windows)
 
 > **Cíl plánu:** Dostat aplikaci mezi tisíce vývojářů po celém světě, vybudovat komunitu fanoušků na GitHubu a využít tuto pozornost jako odrazový můstek pro tvé další projekty.

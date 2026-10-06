@@ -25,6 +25,7 @@ export interface ChatMessage {
   time: string;
   toolName?: string;
   stepIndex?: number;
+  expectedTranscriptCount?: number;
 }
 
 export class ChatOverlay {
@@ -61,6 +62,10 @@ export class ChatOverlay {
   private totalHistoryCount = 0;
   private hasMoreHistory = false;
   private isLoadingHistory = false;
+  // Optimistic messages: user messages sent but not yet confirmed in transcript
+  private pendingUserMessages: ChatMessage[] = [];
+  // Flag to block blur-close during prompt send
+  private isSending = false;
 
   constructor(parent: HTMLElement, pet: ShimejiPet, windowLabel = "island") {
     this.pet = pet;
@@ -377,6 +382,10 @@ export class ChatOverlay {
         : await Bridge.getConversationHistory(this.sessionId, 30);
 
       if (resp && resp.messages) {
+        if (resp.sessionId && resp.sessionId !== "default" && !resp.sessionId.startsWith("ide-win")) {
+          this.sessionId = resp.sessionId;
+          this.pet.sessionId = resp.sessionId;
+        }
         this.lastKnownMtime = resp.mtimeMs;
         this.lastKnownFileSize = resp.fileSize;
         this.totalHistoryCount = resp.totalMessages;
@@ -402,8 +411,20 @@ export class ChatOverlay {
           };
         });
 
-        // If no messages at all in transcript, show friendly mascot greeting
-        if (newMessages.length === 0) {
+        // Retain pending user messages until confirmed in transcript newMessages
+        this.pendingUserMessages = this.pendingUserMessages.filter((pm) => {
+          const matchCountInTranscript = newMessages.filter(
+            (nm) => nm.role === "user" && nm.content.trim() === pm.content.trim()
+          ).length;
+          const expectedCount = pm.expectedTranscriptCount ?? 1;
+          return matchCountInTranscript < expectedCount;
+        });
+        const mergedMessages = this.pendingUserMessages.length > 0
+          ? [...newMessages, ...this.pendingUserMessages]
+          : newMessages;
+
+        // If no messages at all in transcript (and no pending), show friendly mascot greeting
+        if (mergedMessages.length === 0) {
           if (this.messages.length === 0) {
             this.addGreetingMessage();
           }
@@ -411,10 +432,10 @@ export class ChatOverlay {
           return true;
         }
 
-        // Compare if messages changed
+        // Compare if messages changed (include pending in comparison)
         const isSame =
-          this.messages.length === newMessages.length &&
-          this.messages.every((m, idx) => m.id === newMessages[idx]?.id && m.content === newMessages[idx]?.content);
+          this.messages.length === mergedMessages.length &&
+          this.messages.every((m, idx) => m.id === mergedMessages[idx]?.id && m.content === mergedMessages[idx]?.content);
 
         if (isSame && !isInitial) {
           this.isLoadingHistory = false;
@@ -425,7 +446,7 @@ export class ChatOverlay {
         const prevScrollHeight = this.messagesEl.scrollHeight;
         const prevScrollTop = this.messagesEl.scrollTop;
 
-        this.messages = newMessages;
+        this.messages = mergedMessages;
         this.renderAllMessages();
 
         if (loadAll) {
@@ -876,15 +897,19 @@ export class ChatOverlay {
                 <tr>
                   <th>Čas</th>
                   <th>Stav</th>
+                  <th>Cíl (HWND)</th>
                   <th>Prompt</th>
+                  <th>Výsledek & Metoda</th>
                 </tr>
               </thead>
               <tbody>
-                ${rep.promptDispatches.slice(-3).reverse().map(p => `
+                ${rep.promptDispatches.slice(-10).reverse().map(p => `
                   <tr>
                     <td>${p.timestamp.split(" ")[1] || p.timestamp}</td>
-                    <td>${p.success ? "✅" : "⚠️"}</td>
-                    <td title="${this.escapeHtml(p.prompt)}">${this.escapeHtml(p.prompt.slice(0, 32))}...</td>
+                    <td>${p.success ? "✅ Úspěch" : "⚠️ Schránka"}</td>
+                    <td><code>${p.targetHwnd ? "0x" + p.targetHwnd.toString(16).toUpperCase() : "-"}</code></td>
+                    <td title="${this.escapeHtml(p.prompt)}">${this.escapeHtml(p.prompt.slice(0, 24))}...</td>
+                    <td style="font-size:10px;color:#94a3b8;" title="${this.escapeHtml(p.details)}">${this.escapeHtml(p.details)}</td>
                   </tr>
                 `).join("")}
               </tbody>
@@ -1057,8 +1082,32 @@ export class ChatOverlay {
     const text = this.inputEl.value.trim();
     if (!text) return;
 
+    if (text === "/report" || text === "/diag" || text === "/status") {
+      this.inputEl.value = "";
+      Sound.play("blip");
+      void this.toggleDiagnostics();
+      return;
+    }
+
     this.inputEl.value = "";
-    this.inputEl.blur();
+    // Don't blur input — avoids triggering blur event on window that could close chat
+
+    // Mark as sending to prevent blur-close of chat
+    this.isSending = true;
+    window.setTimeout(() => { this.isSending = false; }, 3000);
+
+    // Optimistic update: add user message immediately and remember it
+    const preCount = this.messages.filter(
+      (m) => m.role === "user" && m.content.trim() === text.trim() && !m.id.startsWith("pending-")
+    ).length;
+    const optimisticMsg: ChatMessage = {
+      id: "pending-" + Date.now(),
+      role: "user",
+      content: text,
+      time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      expectedTranscriptCount: preCount + 1,
+    };
+    this.pendingUserMessages.push(optimisticMsg);
     this.addMessage("user", text);
     Sound.play("send");
 
@@ -1067,7 +1116,28 @@ export class ChatOverlay {
     this.pet.setState("working");
     this.pet.showBubble("💻 Kóduji", text.slice(0, 50), 5000);
 
-    // Periodic poller: check for agent response in transcript
+    // Capture pre-send state to accurately identify NEW assistant responses
+    const preSendMsgCount = this.messages.length;
+    const preSendLastAssistant = [...this.messages].reverse().find((m) => m.role === "assistant");
+    const preSendLastAssistantId = preSendLastAssistant?.id;
+
+    // Dispatch prompt to Antigravity IDE project session FIRST
+    void Bridge.sendIdePrompt(this.sessionId, text, this.hwnd || this.pet.hwnd).then((res) => {
+      if (res?.targetHwnd) {
+        this.hwnd = res.targetHwnd;
+        this.pet.hwnd = res.targetHwnd;
+      }
+      if (res) {
+        const targetHex = res.targetHwnd ? "0x" + res.targetHwnd.toString(16).toUpperCase() : "(auto)";
+        const statusIcon = res.success ? "🚀" : "📋";
+        this.addMessage("tool", `${statusIcon} ${res.message} [Cíl: ${targetHex}, metoda: ${res.method}]`);
+      }
+      if (this.isDiagnosticsOpen) {
+        void this.refreshDiagnostics();
+      }
+    });
+
+    // Periodic poller: check transcript for agent response
     let attempts = 0;
     const pollInterval = window.setInterval(async () => {
       attempts++;
@@ -1077,8 +1147,14 @@ export class ChatOverlay {
       }
 
       await this.loadConversationHistory(false);
-      const lastMsg = this.messages[this.messages.length - 1];
-      if (lastMsg && lastMsg.role === "assistant" && !lastMsg.content.includes("Kóduji")) {
+      const latestAssistant = [...this.messages].reverse().find((m) => m.role === "assistant");
+      // Only complete if a genuinely new assistant response was received after prompt dispatch
+      const isNewAssistantReply =
+        latestAssistant &&
+        latestAssistant.id !== preSendLastAssistantId &&
+        this.messages.length > preSendMsgCount;
+
+      if (isNewAssistantReply) {
         window.clearInterval(pollInterval);
         this.updateStatus("finished", "Dokončeno ✨");
         this.pet.setState("finish");
@@ -1094,7 +1170,7 @@ export class ChatOverlay {
         return;
       }
 
-      if (attempts >= 60) {
+      if (attempts >= 40) {
         window.clearInterval(pollInterval);
         if (this.currentStatus === "working" || this.currentStatus === "thinking") {
           this.updateStatus("idle", "Připraven");
@@ -1102,21 +1178,7 @@ export class ChatOverlay {
           this.pet.hideBubble();
         }
       }
-    }, 1500);
-
-    // Dispatch prompt to Antigravity IDE project session
-    void Bridge.sendIdePrompt(this.sessionId, text, this.hwnd || this.pet.hwnd).then((res) => {
-      if (res?.targetHwnd) {
-        this.hwnd = res.targetHwnd;
-        this.pet.hwnd = res.targetHwnd;
-      }
-      if (res && !res.success && res.message) {
-        this.addMessage("tool", `ℹ️ ${res.message}`);
-      }
-      if (this.isDiagnosticsOpen) {
-        void this.refreshDiagnostics();
-      }
-    });
+    }, 2000);
   }
 
   private setupEvents() {
@@ -1175,10 +1237,17 @@ export class ChatOverlay {
       }
     });
 
-    // Window blur closes chat overlay cleanly
+    // Window blur: only close if we are NOT currently sending a prompt.
+    // Sending a prompt causes brief focus changes via keybd_event injection
+    // which would otherwise close the chat mid-send.
     window.addEventListener("blur", () => {
-      if (this.isOpen) {
-        this.close();
+      if (this.isOpen && !this.isSending) {
+        // Small delay to avoid closing on transient focus shifts during injection
+        window.setTimeout(() => {
+          if (this.isOpen && !this.isSending) {
+            this.close();
+          }
+        }, 400);
       }
     });
   }

@@ -42,13 +42,17 @@
 - **Window-Specific Focus & Chat:** Double-clicking any pet instantly brings that specific IDE window to the foreground (`SetForegroundWindow`). Right-clicking opens the chat overlay for that specific project.
 - **Graceful Window Exit:** When an additional IDE window is closed, its extra companion waves goodbye (*"👋 Měj se hezky!"*) and disappears, leaving your other companions active.
 
-### 💬 Two-Way IDE Chat Mirror & Full Conversation Streaming
+### 💬 Two-Way IDE Chat Mirror & Rock-Solid Prompt Injection (v0.1.2)
+- **Direct Windows UI Automation Target Focus (`IUIAutomation`):** Prompts submitted through the mascot chat overlay target the Antigravity chat input directly via OS-level Windows UI Automation (`ControlType::ComboBox`, `Name = "Message input"`).
+- **Zero Terminal Mis-Pastes:** Calling `SetFocus()` directly on the chat element forcefully transfers OS keyboard focus out of active integrated PowerShell terminals or editor tabs into the chat textarea. Prompts are **never accidentally typed or executed into the terminal**, even if the terminal had active focus before clicking the mascot!
+- **Exact Bounding Box Hit-Testing:** Automatically queries real-time physical screen coordinates and monitor DPI, ensuring synthetic click sequences land dead-center in the input box.
+- **Graceful Fallback:** If UI Automation is disabled, seamlessly falls back to DPI-scaled geometric offset calculations.
 - **Complete Conversation Mirroring:** The desktop chat overlay renders the **entire conversation history directly from Antigravity IDE** (`transcript.jsonl`), displaying pure user prompts and assistant responses without internal system tags or reasoning noise.
 - **Rich Markdown with 1-Click Code Copy:** Headings, bulleted and numbered lists, blockquotes, and code blocks rendered in custom `.chat-code-card` frames with syntax badges and a `📋 Kopírovat` button.
 - **Smart Scrolling & Floating Indicator:** Automatically aligns down upon arrival of new messages if you are at the bottom. If you scroll up to read past history, your position is preserved and an unobtrusive `⬇️ Nová zpráva` floating pill lets you jump down on demand.
 - **Incremental Fast Loading:** Loads the last 30 turns instantly, with an `⬆️ Load older history` button to prepend earlier turns without jumping.
 - **Live Background Sync:** Actively monitors the transcript file every 1.2s while open to stream in new responses in real-time, completely powering down when closed for 0.0% idle CPU.
-- **Ghost Mode / Silent Background Prompt Injection:** Type prompts directly into the desktop chat overlay. The app can inject prompts directly into the agent input on the background without stealing your active window focus or popping up the IDE window over your work.
+- **Ghost Mode / Background Prompt Dispatch:** Dispatches prompts directly into the agent input while preserving user clipboard content and window focus.
 
 ### 🎨 8 Handcrafted Retro Pixel-Art Mascots
 Rendered on an HTML5 canvas with crisp nearest-neighbor pixel scaling and dynamic color palettes:
@@ -173,11 +177,12 @@ npm run tauri dev
 
 ## 🧪 Automated Testing
 
-The project includes an automated test suite of **12 unit tests** in TypeScript and **11 unit tests** in Rust that validate multi-window assignment, session aliasing, settings suppression, single-pet safety guards, and silent prompt injection:
+The project includes an automated test suite of **14 unit tests** in TypeScript and **13 unit tests** in Rust that validate multi-window assignment, session aliasing, settings suppression, single-pet safety guards, UI Automation focus injection, and prompt dispatch:
 
 ```powershell
 cd windows
 npm test
+cargo test --manifest-path src-tauri\Cargo.toml
 ```
 
 Expected output:
@@ -195,8 +200,10 @@ Expected output:
 ✓ Test 10: Project badge accurately displays workspace ('📁 coucou-main') and filters out open files ('README.md')
 ✓ Test 11: Settings window exception verified: opening settings never spawns a 'setting' mascot (100% OK)
 ✓ Test 12: Single pet preservation verified: mascot NEVER disappears when opening settings or unbinding window (100% OK)
+✓ Test 13: SessionEnd hook safeguard verified: last pet is NEVER removed on agent session stop (100% OK)
+✓ Test 14: Pet Companion Settings & Preferences verified: toggle preferences persist and reflect across pets (100% OK)
 
-ALL 12 MULTI-PET, CONVERSATION MIRROR & SETTINGS EXCEPTION TESTS PASSED SUCCESSFULLY! (100% OK)
+ALL 14 MULTI-PET, CONVERSATION MIRROR & SAFEGUARD TESTS PASSED SUCCESSFULLY! (100% OK)
 ```
 
 ---

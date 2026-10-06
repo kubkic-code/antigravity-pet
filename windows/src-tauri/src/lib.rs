@@ -8,7 +8,7 @@ mod pipe;
 mod settings;
 mod tray;
 mod win_user;
-mod window_finder;
+pub mod window_finder;
 mod pet_manager;
 
 use std::os::windows::process::CommandExt;
@@ -222,58 +222,40 @@ fn send_ide_prompt(
     }));
 
     // Find best target window: provided hwnd, or auto-discovered Antigravity window
-    let target = if let Some(h) = hwnd.filter(|&v| v != 0) {
+    let target = if let Some(h) = hwnd.filter(|&v| v != 0 && window_finder::is_window_valid(v)) {
         Some(h)
     } else {
-        window_finder::find_antigravity_window(None, None)
+        let mut proj_filter: Option<String> = None;
+        if let Some(manager) = app.try_state::<pet_manager::PetManager>() {
+            if let Some(sess) = manager.get_session(&session_id) {
+                proj_filter = sess.project_name.clone();
+            }
+        }
+        window_finder::find_antigravity_window(None, proj_filter.as_deref())
+            .or_else(|| window_finder::find_antigravity_window(None, None))
     };
 
-    if let Some(h) = target {
-        log::line(format!("send_ide_prompt injecting silently into hwnd=0x{:X}", h));
-        let ok = window_finder::inject_prompt_to_ide_silent(h, &prompt);
-        let msg = if ok {
-            "Prompt byl odeslán agentovi na pozadí! 🚀".to_string()
-        } else {
-            "Odeslání na pozadí se nezdařilo. Prompt je připraven ve schránce (Ctrl+V).".to_string()
-        };
-
-        diagnostics::record_prompt_dispatch(
-            &prompt,
-            Some(h),
-            "ide_silent_injection",
-            ok,
-            &msg,
-        );
-
-        PromptResult {
-            success: ok,
-            target_hwnd: Some(h),
-            method: "ide_silent_injection".into(),
-            message: msg,
-        }
+    let ok = window_finder::inject_prompt_to_ide(target.unwrap_or(0), &prompt);
+    let msg = if ok {
+        "Prompt byl vložen do chatu Antigravity a odeslán! 🚀".to_string()
     } else {
-        log::line("send_ide_prompt: no Antigravity window found, copying to clipboard");
-        let copied = window_finder::set_clipboard_text(&prompt);
-        let msg = if copied {
-            "Antigravity IDE okno nebylo detekováno. Prompt zkopírován do schránky (Ctrl+V) 📋".to_string()
-        } else {
-            "Antigravity IDE okno nebylo nalezeno a schránka selhala.".to_string()
-        };
+        "Prompt je připraven ve schránce (Ctrl+V) 📋".to_string()
+    };
 
-        diagnostics::record_prompt_dispatch(
-            &prompt,
-            None,
-            "clipboard_fallback",
-            copied,
-            &msg,
-        );
+    let method = if ok { "ide_ui_injection" } else { "clipboard_fallback" };
+    diagnostics::record_prompt_dispatch(
+        &prompt,
+        target,
+        method,
+        ok,
+        &msg,
+    );
 
-        PromptResult {
-            success: false,
-            target_hwnd: None,
-            method: "clipboard_fallback".into(),
-            message: msg,
-        }
+    PromptResult {
+        success: ok,
+        target_hwnd: target,
+        method: method.into(),
+        message: msg,
     }
 }
 
@@ -331,15 +313,46 @@ struct ResolvedTranscript {
     pub session_id: String,
 }
 
-fn resolve_transcript_path(session_id: Option<&str>) -> Option<ResolvedTranscript> {
+fn is_transcript_matching_project(
+    path: &std::path::Path,
+    project_name: Option<&str>,
+    cwd: Option<&str>,
+) -> bool {
+    let Ok(file) = std::fs::File::open(path) else { return false };
+    use std::io::Read;
+    let mut reader = std::io::BufReader::new(file);
+    let mut buffer = [0u8; 8192];
+    let Ok(n) = reader.read(&mut buffer) else { return false };
+    if n == 0 { return false };
+    let sample = String::from_utf8_lossy(&buffer[..n]).to_lowercase();
+
+    if let Some(c) = cwd {
+        let clean_c = c.trim().to_lowercase();
+        if !clean_c.is_empty() && sample.contains(&clean_c) {
+            return true;
+        }
+    }
+
+    if let Some(p) = project_name {
+        let clean_p = p.trim().to_lowercase();
+        if !clean_p.is_empty() && sample.contains(&clean_p) {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn resolve_transcript_path(app: Option<&AppHandle>, session_id: Option<&str>) -> Option<ResolvedTranscript> {
     let user_profile = std::env::var("USERPROFILE").ok()?;
     let brain_dir = std::path::PathBuf::from(user_profile)
         .join(".gemini")
         .join("antigravity-ide")
         .join("brain");
 
+    // 1. Direct match if session_id is a valid UUID directory in brain/
     if let Some(sid) = session_id {
-        if !sid.is_empty() && sid != "default" && !sid.starts_with("ide-window-") {
+        if !sid.is_empty() && sid != "default" && !sid.starts_with("ide-win") {
             let candidate = brain_dir
                 .join(sid)
                 .join(".system_generated")
@@ -354,10 +367,67 @@ fn resolve_transcript_path(session_id: Option<&str>) -> Option<ResolvedTranscrip
         }
     }
 
-    // Fallback: search for most recently modified transcript across brain dirs
+    // 2. Query PetManager for project_name, cwd, or mapped conversation_id
+    let mut target_project: Option<String> = None;
+    let mut target_cwd: Option<String> = None;
+    let mut mapped_conv_id: Option<String> = None;
+
+    if let Some(app_handle) = app {
+        if let Some(manager) = app_handle.try_state::<pet_manager::PetManager>() {
+            if let Some(sid) = session_id {
+                if let Some(sess) = manager.get_session(sid) {
+                    mapped_conv_id = sess.conversation_id.lock().unwrap().clone();
+                    target_project = sess.project_name.clone();
+                    target_cwd = sess.cwd.clone();
+                }
+            }
+            if target_project.is_none() {
+                for sess in manager.all_sessions() {
+                    if let Some(cid) = sess.conversation_id.lock().unwrap().clone() {
+                        if mapped_conv_id.is_none() {
+                            mapped_conv_id = Some(cid);
+                        }
+                    }
+                    if target_project.is_none() && sess.project_name.is_some() {
+                        target_project = sess.project_name.clone();
+                        target_cwd = sess.cwd.clone();
+                    }
+                }
+            }
+        }
+    }
+
+    // If conversation_id was mapped, check its transcript
+    if let Some(cid) = mapped_conv_id {
+        let candidate = brain_dir
+            .join(&cid)
+            .join(".system_generated")
+            .join("logs")
+            .join("transcript.jsonl");
+        if candidate.exists() {
+            return Some(ResolvedTranscript {
+                path: candidate,
+                session_id: cid,
+            });
+        }
+    }
+
+    // If target_project is still None, inspect current process working directory
+    if target_project.is_none() {
+        if let Ok(cur_dir) = std::env::current_dir() {
+            let cur_str = cur_dir.to_string_lossy().to_string();
+            let proj = crate::window_finder::extract_project_name("", Some(&cur_str));
+            if !crate::window_finder::is_settings_name(&proj) && !proj.is_empty() {
+                target_project = Some(proj);
+                target_cwd = Some(cur_str);
+            }
+        }
+    }
+
+    // 3. Search brain/ directories for transcripts matching this project
     let entries = std::fs::read_dir(&brain_dir).ok()?;
-    let mut latest = None;
-    let mut latest_time = std::time::SystemTime::UNIX_EPOCH;
+    let mut candidates: Vec<(std::time::SystemTime, std::path::PathBuf, String)> = Vec::new();
+
     for entry in entries.flatten() {
         let dir_path = entry.path();
         let candidate = dir_path
@@ -366,22 +436,33 @@ fn resolve_transcript_path(session_id: Option<&str>) -> Option<ResolvedTranscrip
             .join("transcript.jsonl");
         if let Ok(meta) = candidate.metadata() {
             if let Ok(modified) = meta.modified() {
-                if modified > latest_time {
-                    latest_time = modified;
-                    let sid = dir_path
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("default")
-                        .to_string();
-                    latest = Some(ResolvedTranscript {
-                        path: candidate,
-                        session_id: sid,
-                    });
+                let sid = dir_path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("default")
+                    .to_string();
+
+                if target_project.is_some() || target_cwd.is_some() {
+                    if is_transcript_matching_project(&candidate, target_project.as_deref(), target_cwd.as_deref()) {
+                        candidates.push((modified, candidate, sid));
+                    }
+                } else {
+                    candidates.push((modified, candidate, sid));
                 }
             }
         }
     }
-    latest
+
+    candidates.sort_by(|a, b| b.0.cmp(&a.0));
+
+    if let Some((_, path, sid)) = candidates.into_iter().next() {
+        return Some(ResolvedTranscript {
+            path,
+            session_id: sid,
+        });
+    }
+
+    None
 }
 
 fn clean_user_content(raw: &str) -> String {
@@ -547,15 +628,15 @@ fn extract_conversation_history(path: &std::path::Path, limit: Option<usize>) ->
 }
 
 #[tauri::command]
-fn get_latest_ide_response(session_id: Option<String>) -> Option<String> {
-    let resolved = resolve_transcript_path(session_id.as_deref())?;
+fn get_latest_ide_response(app: AppHandle, session_id: Option<String>) -> Option<String> {
+    let resolved = resolve_transcript_path(Some(&app), session_id.as_deref())?;
     let (messages, _, _, _) = extract_conversation_history(&resolved.path, Some(5))?;
     messages.into_iter().rev().find(|m| m.role == "assistant").map(|m| m.content)
 }
 
 #[tauri::command]
-fn get_conversation_history(session_id: Option<String>, limit: Option<usize>) -> Option<ChatHistoryResponse> {
-    let resolved = resolve_transcript_path(session_id.as_deref())?;
+fn get_conversation_history(app: AppHandle, session_id: Option<String>, limit: Option<usize>) -> Option<ChatHistoryResponse> {
+    let resolved = resolve_transcript_path(Some(&app), session_id.as_deref())?;
     let effective_limit = limit.unwrap_or(30);
     let (messages, total_count, mtime_ms, file_size) = extract_conversation_history(&resolved.path, Some(effective_limit))?;
     let has_more = total_count > messages.len();
@@ -571,8 +652,8 @@ fn get_conversation_history(session_id: Option<String>, limit: Option<usize>) ->
 }
 
 #[tauri::command]
-fn get_all_conversation_history(session_id: Option<String>) -> Option<ChatHistoryResponse> {
-    let resolved = resolve_transcript_path(session_id.as_deref())?;
+fn get_all_conversation_history(app: AppHandle, session_id: Option<String>) -> Option<ChatHistoryResponse> {
+    let resolved = resolve_transcript_path(Some(&app), session_id.as_deref())?;
     let (messages, total_count, mtime_ms, file_size) = extract_conversation_history(&resolved.path, None)?;
 
     Some(ChatHistoryResponse {
@@ -586,8 +667,8 @@ fn get_all_conversation_history(session_id: Option<String>) -> Option<ChatHistor
 }
 
 #[tauri::command]
-fn get_transcript_metadata(session_id: Option<String>) -> Option<TranscriptMetadata> {
-    let resolved = resolve_transcript_path(session_id.as_deref())?;
+fn get_transcript_metadata(app: AppHandle, session_id: Option<String>) -> Option<TranscriptMetadata> {
+    let resolved = resolve_transcript_path(Some(&app), session_id.as_deref())?;
     let meta = std::fs::metadata(&resolved.path).ok()?;
     let mtime_ms = meta.modified().ok()
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
@@ -782,6 +863,41 @@ fn open_settings_window(app: AppHandle) {
 }
 
 pub fn run() {
+    #[cfg(windows)]
+    let _single_instance_guard = {
+        use windows::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError};
+        use windows::Win32::System::Threading::CreateMutexW;
+
+        let mutex_name: Vec<u16> = "Global\\AntigravityPet_SingleInstance_App\0"
+            .encode_utf16()
+            .collect();
+        let h_mutex = unsafe {
+            CreateMutexW(
+                None,
+                true,
+                windows::core::PCWSTR(mutex_name.as_ptr()),
+            )
+        };
+        if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
+            #[cfg(debug_assertions)]
+            {
+                use std::os::windows::process::CommandExt;
+                let our_pid = std::process::id();
+                let _ = std::process::Command::new("taskkill")
+                    .args(&["/F", "/IM", "coucou.exe", "/FI", &format!("PID ne {our_pid}")])
+                    .creation_flags(0x08000000)
+                    .output();
+                std::thread::sleep(std::time::Duration::from_millis(250));
+            }
+            #[cfg(not(debug_assertions))]
+            {
+                log::line("Another instance is already running; exiting cleanly.");
+                std::process::exit(0);
+            }
+        }
+        h_mutex
+    };
+
     let loaded = settings::load();
     let gate = Arc::new(PollGate::new());
 

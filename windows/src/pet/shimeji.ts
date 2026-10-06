@@ -419,21 +419,14 @@ export class ShimejiPet {
     }
 
     if (nextState === "working" || nextState === "thinking") {
-      // Safety watchdog: if IDE stops or response was received without hook, auto-recover in 12s
+      // Safety watchdog: if mascot is left working/thinking for 60s with no IDE events, gently return to idle
       this.stateWatchdogTimeout = window.setTimeout(() => {
         if (this.state === "working" || this.state === "thinking") {
-          this.setState("finish");
-          this.showBubble("✨ Hotovo", "Úkol byl dokončen!", 3500);
-          this.chatOverlay?.updateStatus?.("finished", "Dokončeno ✨");
-          window.setTimeout(() => {
-            if (this.state === "finish") {
-              this.setState("idle");
-              this.hideBubble();
-              this.chatOverlay?.updateStatus?.("idle");
-            }
-          }, 3500);
+          this.setState("idle");
+          this.hideBubble();
+          this.chatOverlay?.updateStatus?.("idle", "Připraven");
         }
-      }, 12000);
+      }, 60000);
     }
   }
 

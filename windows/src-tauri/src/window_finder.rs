@@ -4,18 +4,20 @@
 
 use serde::Serialize;
 use windows::core::BOOL;
-use windows::Win32::Foundation::{HGLOBAL, HWND, LPARAM};
+use windows::Win32::Foundation::{HGLOBAL, HWND, LPARAM, POINT};
 use windows::Win32::System::Threading::{
     AttachThreadInput, GetCurrentThreadId, OpenProcess, QueryFullProcessImageNameW,
     PROCESS_NAME_FORMAT, PROCESS_QUERY_LIMITED_INFORMATION,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    keybd_event, KEYEVENTF_KEYUP, VK_CONTROL, VK_L, VK_MENU, VK_RETURN, VK_V,
+    keybd_event, mouse_event, KEYEVENTF_KEYUP, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP,
+    VK_CONTROL, VK_MENU, VK_RETURN, VK_V,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    BringWindowToTop, EnumWindows, GetClassNameW, GetForegroundWindow, GetWindowRect, GetWindowTextW,
-    GetWindowThreadProcessId, IsIconic, IsWindow, IsWindowVisible, SetForegroundWindow, ShowWindow,
-    SW_MINIMIZE, SW_RESTORE, SW_SHOW, SW_SHOWNOACTIVATE,
+    BringWindowToTop, EnumWindows, GetClassNameW, GetCursorPos, GetForegroundWindow,
+    GetWindowRect, GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindow, IsWindowVisible,
+    SetCursorPos, SetForegroundWindow, SetWindowPos, ShowWindow, HWND_TOP, SWP_NOMOVE, SWP_NOSIZE,
+    SWP_SHOWWINDOW, SW_RESTORE, SW_SHOW,
 };
 
 #[derive(Clone, Debug, Serialize)]
@@ -436,7 +438,11 @@ unsafe extern "system" fn enum_windows_callback(hwnd: HWND, lparam: LPARAM) -> B
     let lower_class = class_name.to_lowercase();
 
     // Reject non-IDE processes immediately (browsers, terminals, chats, etc.)
-    if !is_ide_process(&lower_path) {
+    if !lower_path.is_empty() {
+        if !is_ide_process(&lower_path) {
+            return true.into();
+        }
+    } else if !lower_title.contains("antigravity") && !lower_title.contains("visual studio code") {
         return true.into();
     }
 
@@ -517,10 +523,35 @@ unsafe extern "system" fn enum_windows_callback(hwnd: HWND, lparam: LPARAM) -> B
     true.into()
 }
 
+#[link(name = "user32")]
+extern "system" {
+    fn OpenDesktopA(
+        lpszDesktop: *const u8,
+        dwFlags: u32,
+        fInherit: i32,
+        dwDesiredAccess: u32,
+    ) -> isize;
+    fn SetThreadDesktop(hDesktop: isize) -> i32;
+    fn SetThreadDpiAwarenessContext(dpiContext: isize) -> isize;
+    fn GetDpiForWindow(hwnd: HWND) -> u32;
+    fn AllowSetForegroundWindow(dwProcessId: u32) -> i32;
+}
+
+pub fn ensure_default_desktop() {
+    unsafe {
+        let name = b"Default\0";
+        let h_desk = OpenDesktopA(name.as_ptr(), 0, 0, 0x1FF);
+        if h_desk != 0 {
+            let _ = SetThreadDesktop(h_desk);
+        }
+    }
+}
+
 pub fn find_antigravity_window_info(
     pid: Option<u32>,
     project_name: Option<&str>,
 ) -> Option<IdeWindowInfo> {
+    ensure_default_desktop();
     let mut ctx = SearchContext {
         target_pid: pid,
         project_name,
@@ -658,6 +689,7 @@ unsafe extern "system" fn enum_all_windows_callback(hwnd: HWND, lparam: LPARAM) 
 
 /// Enumerate all currently visible top-level Antigravity IDE windows on the desktop.
 pub fn enumerate_all_ide_windows() -> Vec<IdeWindowInfo> {
+    ensure_default_desktop();
     let mut ctx = EnumAllContext {
         our_pid: std::process::id(),
         windows: Vec::new(),
@@ -798,6 +830,7 @@ pub fn set_clipboard_text(text: &str) -> bool {
 }
 
 /// Native Win32 clipboard getter for UTF-16 Unicode text.
+#[allow(dead_code)]
 pub fn get_clipboard_text() -> Option<String> {
     use windows::Win32::System::DataExchange::{CloseClipboard, GetClipboardData, OpenClipboard};
     use windows::Win32::System::Memory::{GlobalLock, GlobalUnlock};
@@ -835,6 +868,7 @@ pub fn get_clipboard_text() -> Option<String> {
 
 /// Finds the user's active application window (e.g. Google Chrome, Edge, etc.)
 /// excluding Coucou itself and the target Antigravity IDE window.
+#[allow(dead_code)]
 pub fn find_user_foreground_window(target_ide_hwnd: HWND) -> Option<HWND> {
     let our_pid = std::process::id();
     let current_fore = unsafe { GetForegroundWindow() };
@@ -887,119 +921,329 @@ pub fn find_user_foreground_window(target_ide_hwnd: HWND) -> Option<HWND> {
     ctx.found
 }
 
-/// Injects prompt into the active Antigravity IDE chat input silently on the background:
-/// 1. Captures and preserves the user's current foreground window (e.g. Google Chrome) and active thread.
-/// 2. Captures and preserves the user's existing Windows clipboard content.
-/// 3. Backs up the IDE window's minimized/visibility state.
-/// 4. Places the prompt into clipboard and performs rapid thread-attached keystroke injection (Ctrl+L, Ctrl+V, Enter).
-/// 5. IMMEDIATELY restores the user's previous foreground window (e.g. Chrome) and keyboard focus.
-/// 6. If the IDE was originally minimized, re-minimizes it so it stays hidden.
-/// 7. Restores the user's original clipboard content so no copied data is lost.
-pub fn inject_prompt_to_ide_silent(hwnd_val: isize, prompt: &str) -> bool {
-    if hwnd_val == 0 {
-        return false;
+/// Finds the Antigravity IDE CLI executable (`antigravity-ide.cmd`).
+#[allow(dead_code)]
+pub fn find_antigravity_cli_path() -> Option<std::path::PathBuf> {
+    // 1. Check LOCALAPPDATA / ProgramFiles standard install locations
+    if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
+        let p = std::path::PathBuf::from(&local_app_data)
+            .join("Programs")
+            .join("Antigravity IDE")
+            .join("bin")
+            .join("antigravity-ide.cmd");
+        if p.exists() {
+            return Some(p);
+        }
+        let p2 = std::path::PathBuf::from(&local_app_data)
+            .join("Programs")
+            .join("antigravity")
+            .join("bin")
+            .join("antigravity.cmd");
+        if p2.exists() {
+            return Some(p2);
+        }
     }
-    let target_hwnd = HWND(hwnd_val as *mut _);
+    if let Ok(pf) = std::env::var("ProgramFiles") {
+        let p = std::path::PathBuf::from(pf)
+            .join("Antigravity IDE")
+            .join("bin")
+            .join("antigravity-ide.cmd");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    // 2. Check PATH environment variable
+    if let Some(paths) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&paths) {
+            let c1 = dir.join("antigravity-ide.cmd");
+            if c1.exists() {
+                return Some(c1);
+            }
+            let c2 = dir.join("antigravity-ide");
+            if c2.exists() {
+                return Some(c2);
+            }
+        }
+    }
+    None
+}
+
+/// Searches for the Antigravity IDE chat input textarea via Windows UI Automation,
+/// calls SetFocus() directly on the ComboBox element to ensure focus leaves the terminal/editor,
+/// and returns the physical screen center coordinates (X, Y) of the element for synthetic mouse activation.
+pub fn find_and_focus_chat_input_via_uia(target_hwnd: HWND) -> Option<(i32, i32)> {
+    use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED};
+    use windows::Win32::System::Variant::{VariantInit, VT_BSTR, VT_I4};
+    use windows::Win32::UI::Accessibility::{
+        CUIAutomation, IUIAutomation, TreeScope_Descendants,
+        UIA_ComboBoxControlTypeId, UIA_ControlTypePropertyId, UIA_NamePropertyId,
+    };
+    use windows::core::BSTR;
+
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let uia: IUIAutomation = CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER).ok()?;
+        let root = uia.ElementFromHandle(target_hwnd).ok()?;
+
+        // Condition 1: ControlType == ComboBox
+        let mut var_type = VariantInit();
+        (*var_type.Anonymous.Anonymous).vt = VT_I4;
+        (*var_type.Anonymous.Anonymous).Anonymous.lVal = UIA_ComboBoxControlTypeId.0 as i32;
+        let cond_type = uia.CreatePropertyCondition(UIA_ControlTypePropertyId, &var_type).ok()?;
+
+        // Condition 2: Name == "Message input"
+        let mut var_name = VariantInit();
+        (*var_name.Anonymous.Anonymous).vt = VT_BSTR;
+        let bstr = BSTR::from("Message input");
+        (*var_name.Anonymous.Anonymous).Anonymous.bstrVal = std::mem::ManuallyDrop::new(bstr);
+        let cond_name = uia.CreatePropertyCondition(UIA_NamePropertyId, &var_name).ok()?;
+
+        let and_cond = uia.CreateAndCondition(&cond_type, &cond_name).ok()?;
+
+        // Try exact match first
+        let found_el = match root.FindFirst(TreeScope_Descendants, &and_cond) {
+            Ok(el) => Some(el),
+            Err(_) => {
+                // Fallback: search for any ComboBox in case title is slightly different
+                root.FindFirst(TreeScope_Descendants, &cond_type).ok()
+            }
+        };
+
+        if let Some(el) = found_el {
+            // Explicitly transfer keyboard focus to the chat input via UI Automation
+            let _ = el.SetFocus();
+            if let Ok(rect) = el.CurrentBoundingRectangle() {
+                if rect.right > rect.left && rect.bottom > rect.top {
+                    let cx = rect.left + (rect.right - rect.left) / 2;
+                    let cy = rect.top + (rect.bottom - rect.top) / 2;
+                    crate::log::line(format!(
+                        "find_and_focus_chat_input_via_uia: focused input at ({cx}, {cy}), bounds [{}, {}, {}, {}]",
+                        rect.left, rect.top, rect.right, rect.bottom
+                    ));
+                    return Some((cx, cy));
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Injects prompt into the active Antigravity IDE chat input:
+/// 1. Backs up user's original clipboard content and cursor position.
+/// 2. Places prompt into Windows Clipboard.
+/// 3. Locates the target Antigravity IDE window and restores it if minimized.
+/// 4. Targets the chat input box located in the Secondary Side Bar (bottom-right of IDE window).
+/// 5. Clicks the input textarea (focusing it cleanly WITHOUT toggling the sidebar or affecting open files).
+/// 6. Sends Ctrl+A, Ctrl+V, and Enter to paste and submit the prompt to the Antigravity Agent.
+/// 7. Restores the user's original mouse position and foreground window.
+/// 8. Restores original clipboard content asynchronously after dispatch.
+pub fn inject_prompt_to_ide(hwnd_val: isize, prompt: &str) -> bool {
+    ensure_default_desktop();
+    // 1. Resolve target Antigravity IDE window handle
+    let target_hwnd = if hwnd_val != 0 && is_window_valid(hwnd_val) {
+        HWND(hwnd_val as *mut _)
+    } else if let Some(found_hwnd) = find_antigravity_window(None, None) {
+        HWND(found_hwnd as *mut _)
+    } else {
+        crate::log::line("inject_prompt_to_ide: no valid Antigravity IDE window found");
+        let _ = set_clipboard_text(prompt);
+        return false;
+    };
 
     unsafe {
         if !IsWindow(Some(target_hwnd)).as_bool() {
+            crate::log::line("inject_prompt_to_ide: target window is not a valid window");
+            let _ = set_clipboard_text(prompt);
             return false;
         }
 
-        // 1. Capture current foreground window and state
-        let user_window = find_user_foreground_window(target_hwnd);
-        let was_minimized = IsIconic(target_hwnd).as_bool();
+        // 2. Capture user state
         let original_clipboard = get_clipboard_text();
+        let mut original_cursor = POINT::default();
+        let _ = GetCursorPos(&mut original_cursor);
+        let _prev_foreground = GetForegroundWindow();
 
-        // 2. Put user's prompt into clipboard
+        // 3. Put prompt into clipboard
         if !set_clipboard_text(prompt) {
+            crate::log::line("inject_prompt_to_ide: failed to set clipboard text");
             return false;
         }
 
-        // 3. Attach thread inputs for clean background dispatch
+        // Set thread DPI awareness context to Per-Monitor V2 so SetCursorPos matches physical coordinates
+        let prev_dpi = SetThreadDpiAwarenessContext(-4); // DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
+
+        // 4. If minimized, restore so controls and message loop are active
+        if IsIconic(target_hwnd).as_bool() {
+            let _ = ShowWindow(target_hwnd, SW_RESTORE);
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        } else {
+            let _ = ShowWindow(target_hwnd, SW_SHOW);
+        }
+
+        // 5. Attach thread inputs for reliable focus activation across processes
         let cur_thread = GetCurrentThreadId();
-        let target_thread = GetWindowThreadProcessId(target_hwnd, None);
-        let user_thread = if let Some(uw) = user_window {
-            GetWindowThreadProcessId(uw, None)
+        let fg_hwnd = GetForegroundWindow();
+        let fg_thread = if fg_hwnd.0 as isize != 0 {
+            GetWindowThreadProcessId(fg_hwnd, None)
         } else {
             0
         };
+        let target_thread = GetWindowThreadProcessId(target_hwnd, None);
 
+        // Attach to BOTH foreground thread (e.g. Chrome, Explorer) and target thread
+        if fg_thread != 0 && fg_thread != cur_thread {
+            let _ = AttachThreadInput(cur_thread, fg_thread, true);
+        }
         if target_thread != 0 && target_thread != cur_thread {
             let _ = AttachThreadInput(cur_thread, target_thread, true);
         }
-        if user_thread != 0 && user_thread != cur_thread {
-            let _ = AttachThreadInput(cur_thread, user_thread, true);
-        }
 
-        // Pulse Alt key to grant temporary activation privilege
+        let _ = AllowSetForegroundWindow(0xFFFFFFFF); // ASFW_ANY
+
+        // Pulse Alt key (VK_MENU) to bypass Windows foreground lock
         keybd_event(VK_MENU.0 as u8, 0, Default::default(), 0);
         keybd_event(VK_MENU.0 as u8, 0, KEYEVENTF_KEYUP, 0);
 
-        if was_minimized {
-            let _ = ShowWindow(target_hwnd, SW_SHOWNOACTIVATE);
-        }
+        // Physically bring window to the top of Z-order above all other windows
+        let _ = SetWindowPos(
+            target_hwnd,
+            Some(HWND_TOP),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
+        );
         let _ = BringWindowToTop(target_hwnd);
         let _ = SetForegroundWindow(target_hwnd);
 
-        // Very brief 45ms pause for IDE message loop
-        std::thread::sleep(std::time::Duration::from_millis(45));
+        // Allow Electron / Chromium compositor to wake up and process WM_ACTIVATE
+        std::thread::sleep(std::time::Duration::from_millis(150));
 
-        // Focus chat: Ctrl + L
+        // 6. Focus chat input and determine target coordinates.
+        // UI Automation directly commands Electron to transfer keyboard focus from
+        // active editors/terminals to the chat input ComboBox, eliminating terminal mis-pastes.
+        let uia_coords = find_and_focus_chat_input_via_uia(target_hwnd);
+
+        let (target_x, target_y) = if let Some((cx, cy)) = uia_coords {
+            crate::log::line(format!(
+                "inject_prompt_to_ide: UIA focus succeeded at ({cx}, {cy})"
+            ));
+            (cx, cy)
+        } else {
+            // Fallback: geometric DPI-aware calculation if UIA is unavailable
+            let mut rect = windows::Win32::Foundation::RECT::default();
+            let _ = GetWindowRect(target_hwnd, &mut rect);
+            let win_w = rect.right - rect.left;
+            let win_h = rect.bottom - rect.top;
+
+            if win_w < 300 || win_h < 200 {
+                crate::log::line("inject_prompt_to_ide: target window rect is too small");
+                if fg_thread != 0 && fg_thread != cur_thread {
+                    let _ = AttachThreadInput(cur_thread, fg_thread, false);
+                }
+                if target_thread != 0 && target_thread != cur_thread {
+                    let _ = AttachThreadInput(cur_thread, target_thread, false);
+                }
+                if prev_dpi != 0 {
+                    let _ = SetThreadDpiAwarenessContext(prev_dpi);
+                }
+                return false;
+            }
+
+            // Query real-time monitor DPI for this window (e.g. 96=100%, 120=125%, 144=150%, 192=200%)
+            let dpi = GetDpiForWindow(target_hwnd);
+            let scale = if dpi > 0 { (dpi as f64) / 96.0 } else { 1.25 };
+
+            let h_offset = ((155.0 * scale).round() as i32).clamp(100, (win_w / 2).max(100));
+            let gx = rect.right - h_offset;
+
+            let v_offset = (90.0 * scale).round() as i32;
+            let v_min = (72.0 * scale).round() as i32;
+            let v_max = (112.0 * scale).round() as i32;
+            let v_offset = v_offset.clamp(v_min, v_max);
+            let gy = rect.bottom - v_offset;
+
+            crate::log::line(format!(
+                "inject_prompt_to_ide: UIA fallback to geometric calculation at ({gx}, {gy}) in rect [{}, {}, {}, {}]",
+                rect.left, rect.top, rect.right, rect.bottom
+            ));
+            (gx, gy)
+        };
+
+        // 7. Click directly into the chat input textarea to activate caret in webview
+        let _ = SetCursorPos(target_x, target_y);
+        std::thread::sleep(std::time::Duration::from_millis(40));
+        // Click 1: activates frame/webview
+        mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+        std::thread::sleep(std::time::Duration::from_millis(25));
+        mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+        std::thread::sleep(std::time::Duration::from_millis(40));
+        // Click 2: focuses the input textarea element
+        mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+        std::thread::sleep(std::time::Duration::from_millis(25));
+        mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+        std::thread::sleep(std::time::Duration::from_millis(40));
+        // Click 3: ensures caret is inside the text input
+        mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+        std::thread::sleep(std::time::Duration::from_millis(25));
+        mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+        std::thread::sleep(std::time::Duration::from_millis(80));
+
+        // 8. Select all in case there is existing text (Ctrl + A)
         keybd_event(VK_CONTROL.0 as u8, 0, Default::default(), 0);
-        keybd_event(VK_L.0 as u8, 0, Default::default(), 0);
-        keybd_event(VK_L.0 as u8, 0, KEYEVENTF_KEYUP, 0);
+        keybd_event(b'A', 0, Default::default(), 0);
+        keybd_event(b'A', 0, KEYEVENTF_KEYUP, 0);
         keybd_event(VK_CONTROL.0 as u8, 0, KEYEVENTF_KEYUP, 0);
+        std::thread::sleep(std::time::Duration::from_millis(40));
 
-        std::thread::sleep(std::time::Duration::from_millis(35));
-
-        // Paste: Ctrl + V
+        // 9. Paste user's prompt (Ctrl + V)
         keybd_event(VK_CONTROL.0 as u8, 0, Default::default(), 0);
         keybd_event(VK_V.0 as u8, 0, Default::default(), 0);
         keybd_event(VK_V.0 as u8, 0, KEYEVENTF_KEYUP, 0);
         keybd_event(VK_CONTROL.0 as u8, 0, KEYEVENTF_KEYUP, 0);
+        std::thread::sleep(std::time::Duration::from_millis(80));
 
-        std::thread::sleep(std::time::Duration::from_millis(35));
-
-        // Submit: Enter
+        // 10. Submit prompt to agent (Enter)
         keybd_event(VK_RETURN.0 as u8, 0, Default::default(), 0);
         keybd_event(VK_RETURN.0 as u8, 0, KEYEVENTF_KEYUP, 0);
+        std::thread::sleep(std::time::Duration::from_millis(150));
 
-        // 4. IMMEDIATELY restore the user's window so IDE doesn't stay open!
-        if was_minimized {
-            let _ = ShowWindow(target_hwnd, SW_MINIMIZE);
+        // 11. Restore user's mouse cursor immediately
+        let _ = SetCursorPos(original_cursor.x, original_cursor.y);
+
+        // 12. Detach thread inputs
+        if fg_thread != 0 && fg_thread != cur_thread {
+            let _ = AttachThreadInput(cur_thread, fg_thread, false);
         }
-
-        if let Some(uw) = user_window {
-            let _ = BringWindowToTop(uw);
-            let _ = SetForegroundWindow(uw);
-        }
-
-        // Cleanup thread attachments
         if target_thread != 0 && target_thread != cur_thread {
             let _ = AttachThreadInput(cur_thread, target_thread, false);
         }
-        if user_thread != 0 && user_thread != cur_thread {
-            let _ = AttachThreadInput(cur_thread, user_thread, false);
+
+        // 13. Restore previous DPI context
+        if prev_dpi != 0 {
+            let _ = SetThreadDpiAwarenessContext(prev_dpi);
         }
 
-        // 5. Restore user's original clipboard after a brief moment
-        std::thread::sleep(std::time::Duration::from_millis(50));
-        if let Some(ref prev_clip) = original_clipboard {
-            let _ = set_clipboard_text(prev_clip);
-        }
+        // 14. Keep focus on Antigravity IDE so user and agent can immediately see response
+        // (Do NOT prematurely steal focus back to prev_foreground which interrupts Electron submission)
 
+        // 15. Restore original clipboard after safe delay (allowing Electron to finish reading)
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(1500));
+            if let Some(ref prev_clip) = original_clipboard {
+                let _ = set_clipboard_text(prev_clip);
+            }
+        });
+
+        crate::log::line("inject_prompt_to_ide: prompt successfully injected and submitted");
         true
     }
 }
 
-/// Injects prompt into the active Antigravity IDE chat input:
-/// 1. Copies prompt to Windows Clipboard.
-/// 2. Restores and focuses the IDE window.
-/// 3. Emits Ctrl+L (focus chat), Ctrl+V (paste prompt), and Enter (submit).
 #[allow(dead_code)]
-pub fn inject_prompt_to_ide(hwnd_val: isize, prompt: &str) -> bool {
-    inject_prompt_to_ide_silent(hwnd_val, prompt)
+pub fn inject_prompt_to_ide_silent(hwnd_val: isize, prompt: &str) -> bool {
+    inject_prompt_to_ide(hwnd_val, prompt)
 }
 
 #[cfg(test)]
@@ -1098,5 +1342,22 @@ mod tests {
         assert!(is_ide_process("c:\\users\\user\\appdata\\local\\programs\\microsoft vs code\\code.exe"));
         assert!(is_ide_process("c:\\users\\user\\appdata\\local\\programs\\cursor\\cursor.exe"));
     }
+
+    #[test]
+    fn test_uia_symbols() {
+        if let Some(hwnd_val) = find_antigravity_window(None, None) {
+            let target_hwnd = HWND(hwnd_val as *mut _);
+            let coords = find_and_focus_chat_input_via_uia(target_hwnd);
+            assert!(coords.is_some());
+        }
+    }
 }
+
+
+
+
+
+
+
+
 

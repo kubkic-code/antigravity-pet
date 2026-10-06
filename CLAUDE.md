@@ -158,15 +158,25 @@ Specific companion animates + speech bubble + chat overlay sync + diagnostics lo
   - Closed window tracking (`to_remove`) verifies `(discovered.iter().any(|d| d.hwnd == h) || is_window_ide_process(h)) && is_window_valid(h)` to ensure that opening settings never marks an existing IDE window as dead.
   - In `main.ts`, both `session-removed` AND `SessionEnd` hook events check `if (uniquePets.length <= 1) return;` so the user is never left with 0 pets on the desktop.
 
-### 3. Two-Way Prompt Injection Contract:
+### 3. Two-Way Prompt Injection Contract (v0.1.2 Rock-Solid UIA Architecture):
 When a user submits a prompt via the desktop chat overlay (`chat_overlay.ts`):
 1. `Bridge.sendIdePrompt(hwnd, text)` calls Tauri command `send_ide_prompt` in `lib.rs`.
-2. Rust backend resolves the HWND.
-3. Win32 `restore_and_focus` brings the window to the foreground if requested, or `inject_prompt_to_ide_silent` injects prompt directly on the background without stealing active window focus.
-4. Win32 `SendInput` dispatches `Ctrl+L` to focus the agent input box.
-5. Windows Clipboard is loaded with the prompt text via Win32 clipboard API (and restored afterwards in silent mode).
-6. Win32 `SendInput` dispatches `Ctrl+V` followed by `VK_RETURN` (Enter).
-7. If the window is minimized or unavailable, text remains in the clipboard and a toast notifies the user.
+2. Rust backend resolves the target HWND (`window_finder::find_antigravity_window`).
+3. Backs up user's original clipboard content and mouse cursor position.
+4. Elevates the target Antigravity IDE window to the top of the Z-order (`SetWindowPos HWND_TOP`, `BringWindowToTop`, `SetForegroundWindow`, `AttachThreadInput`, `AllowSetForegroundWindow(0xFFFFFFFF)`, Alt-key pulse).
+5. **Direct Windows UI Automation Focus (`find_and_focus_chat_input_via_uia`):**
+   - Connects to Windows UI Automation via native COM (`IUIAutomation`, `CUIAutomation`).
+   - Searches for the chat textarea ComboBox (`ControlType::ComboBox` with `Name = "Message input"`).
+   - Directly calls `el.SetFocus()` on the ComboBox element. This **forcefully transfers OS keyboard focus directly to the Antigravity chat textarea**, completely preventing prompt leakage into previously focused PowerShell terminals or editor tabs!
+   - Computes the physical screen center coordinates `(cx, cy)` from `el.CurrentBoundingRectangle()`.
+6. **Synthetic Activation & Caret Placement:**
+   - Moves mouse to `(cx, cy)` (or DPI-aware geometric fallback if UIA is disabled).
+   - Injects mouse click sequence to establish Chromium webview user activation.
+7. **Prompt Submission:**
+   - Dispatches `Ctrl+A` (clears existing draft/placeholder), `Ctrl+V` (pastes prompt), and `VK_RETURN` (Enter to submit to agent).
+8. **Restoration:**
+   - Immediately returns user mouse cursor to original position.
+   - Cleans up thread input attachment and restores original clipboard content after 1500ms.
 
 ---
 
@@ -220,12 +230,12 @@ $env:PATH += ";$env:USERPROFILE\.cargo\bin"; npm run build
 ```
 *Compiles `coucou-hook` release binary, runs `tsc --noEmit` and builds `vite` dist in ~250ms with 0 errors.*
 
-### 3. Verify Rust Backend & Unit Tests (11/11 tests):
+### 3. Verify Rust Backend & Unit Tests (13/13 tests):
 ```powershell
 $env:PATH += ";$env:USERPROFILE\.cargo\bin"; cargo test --manifest-path src-tauri\Cargo.toml -- --test-threads=1
 $env:PATH += ";$env:USERPROFILE\.cargo\bin"; cargo check --manifest-path src-tauri\Cargo.toml
 ```
-*Runs all 11 backend unit tests with 100% green output.*
+*Runs all 13 backend unit tests (including UIA COM discovery) with 100% green output.*
 
 ### 4. Build and Deploy Hook Binary:
 ```powershell
@@ -243,7 +253,7 @@ Copy-Item -Force target\release\coucou-hook.exe "$env:LOCALAPPDATA\Coucou\bin\co
 4. **Never Break Preemption:** Agent activities (`working` / `thinking`) must strictly take precedence over idle activities (nap, coffee, dance, snack, whistling). Always ensure `setState("working")` cancels pending activity timeouts and mutes music (`Sound.stopAllMelodies()`). The melody-stop condition in `setState()` covers both `"dance"` and `"walk"` (whistling) as source states.
 5. **Preserve Zero-CPU Idle Architecture:** Never use continuous unconstrained `requestAnimationFrame` loops when the mascot is stationary. When idle, physics loops must sleep. Auto-suspend Web Audio contexts when silent.
 6. **No Bloated Frameworks:** Maintain the ultra-fast, zero-dependency vanilla TypeScript + HTML5 canvas architecture. Do NOT inject heavy UI libraries (React, Vue, Tailwind) into the overlay frontend.
-7. **Always Maintain Test Suite:** Run `node scripts/test_multi_pet.mjs` and `cargo test` after modifying any multi-pet, session, or window-tracking code. All **14 multi-pet tests** and **11 Rust tests** must pass 100%.
+7. **Always Maintain Test Suite:** Run `node scripts/test_multi_pet.mjs` and `cargo test` after modifying any multi-pet, session, or window-tracking code. All **14 multi-pet tests** and **13 Rust tests** must pass 100%.
 8. **`isSettingsName`/`isSettingsWindow` are intentionally triplicated** across `src/main.ts`, `scripts/test_multi_pet.mjs`, and `src-tauri/src/window_finder.rs`. Look for the `KEEP IN SYNC` comments in each file. If you add a new locale variant (e.g. German "einstellungen"), update **all three** locations.
 
 ---

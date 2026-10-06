@@ -554,7 +554,7 @@ dependencies = [
 
 [[package]]
 name = "coucou"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -568,7 +568,7 @@ dependencies = [
 
 [[package]]
 name = "coucou-hook"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "serde_json",
  "windows 0.61.3",

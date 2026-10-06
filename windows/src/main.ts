@@ -174,8 +174,29 @@ async function main() {
       }
     }
 
-    // 3. Adopt an unbound idle pet (initial placeholder or remaining single pet) ONLY IF it has no window bound yet
+    // 3. Match by projectName or single pet: if hook arrives without HWND, alias to existing pet!
     const uniquePetsList = Array.from(new Set(activePets.values()));
+    if (!hwnd && (projectName || uniquePetsList.length === 1)) {
+      for (const petEntry of uniquePetsList) {
+        if (
+          (projectName && petEntry.pet.projectName?.toLowerCase() === projectName.toLowerCase()) ||
+          uniquePetsList.length === 1
+        ) {
+          activePets.set(sessionId, petEntry);
+          if (sessionId !== "default" && !sessionId.startsWith("ide-win")) {
+            petEntry.sessionId = sessionId;
+            petEntry.pet.sessionId = sessionId;
+            petEntry.chat.sessionId = sessionId;
+          }
+          if (projectName || windowTitle) {
+            petEntry.pet.setProjectInfo(projectName, windowTitle);
+          }
+          return petEntry;
+        }
+      }
+    }
+
+    // 4. Adopt an unbound idle pet (initial placeholder or remaining single pet) ONLY IF it has no window bound yet
     const unboundEntry = uniquePetsList.find((p) => p.pet.hwnd == null);
     if (unboundEntry && sessionId !== "default") {
       for (const [id, p] of Array.from(activePets.entries())) {
@@ -403,12 +424,13 @@ async function main() {
       "default";
     const hwnd = typeof payload.hwnd === "number" ? payload.hwnd : undefined;
 
-    const active = getOrCreatePet(sessionId, undefined, hwnd);
     const hookProject =
       (payload.projectName as string | undefined) ??
       (typeof payload.cwd === "string"
         ? payload.cwd.split(/[/\\]/).filter(Boolean).pop()
         : undefined);
+
+    const active = getOrCreatePet(sessionId, undefined, hwnd, hookProject);
     if (hookProject) {
       active.pet.setProjectInfo(hookProject);
     }
