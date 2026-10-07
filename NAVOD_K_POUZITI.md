@@ -3,6 +3,16 @@
 > **Interaktivní 8-bitový desktopový AI společník (Shimeji) pro Google Antigravity IDE na Windows 10/11.**  
 > Zvířátka se procházejí po hlavní liště Windows, reagují na kódování v reálném čase, ožívají vlastními aktivitami a umožňují obousměrnou komunikaci s vaším Antigravity agentem.
 
+<p align="center">
+  <img src="windows/screenshots/antigravity-pet-demo.gif" alt="Ukázka Antigravity Pet v akci" width="100%" style="max-width: 800px; border-radius: 10px;" />
+</p>
+
+<p align="center">
+  <a href="./videa/AntigravityPet_GitHub_Showcase.mp4">
+    🎬 <b>Přehrát video v plné kvalitě s 8-bitovými zvuky a hudbou (MP4)</b>
+  </a>
+</p>
+
 ---
 
 ## 🌟 Hlavní funkce v kostce

@@ -108,6 +108,10 @@ windows/
 |   +-  src/main.rs              # coucou-hook.exe relay binary: reads hook JSON on stdin, writes to Named Pipe, extracts transcript messages
 |
 +-  sounds/                      # WAV sound files (blip, pop, greet, think, work, finish, error, wink, open, close, send, hover)
+|
+videa/                           # Marketing & Social Video Assets
++-  AntigravityPet_Promo_Trailer.mp4 # 16:9 1080p Widescreen Trailer with 8-bit audio (~22s)
++-  AntigravityPet_TikTok_Shorts.mp4 # 9:16 Vertical Cut for TikTok / Reels / Shorts (~20s)
 ```
 
 ---

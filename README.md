@@ -18,6 +18,16 @@
   </a>
 </p>
 
+<p align="center">
+  <img src="windows/screenshots/antigravity-pet-demo.gif" alt="Antigravity Pet Demo Walkthrough" width="100%" style="max-width: 800px; border-radius: 10px; box-shadow: 0 8px 30px rgba(0,0,0,0.5);" />
+</p>
+
+<p align="center">
+  <a href="./videa/AntigravityPet_GitHub_Showcase.mp4">
+    🎬 <b>Watch Full HD Video with 8-Bit Audio & Sound FX (MP4)</b>
+  </a>
+</p>
+
 ---
 
 ## 📖 English & Czech Guides

@@ -58,3 +58,8 @@ NotchBuddy/NotchBuddy.xcodeproj/xcuserdata/
 DerivedData/
 .claude/
 _prive/
+
+# Raw Screen Recordings (keep rendered promos)
+videa/Záznam*
+videa/*obrazovky*
+videa2/

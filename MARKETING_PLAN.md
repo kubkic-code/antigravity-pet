@@ -27,12 +27,12 @@ Neprogramátor ani zaneprázdněný senior vývojář nebude kompilovat kód v t
   * Instaluje se přímo do uživatelského profilu bez nutnosti administrátorských práv.
 * [x] **Automatické vydávání verzí na GitHubu:**
   * Nastaven GitHub Actions workflow (`.github/workflows/windows.yml`), který při každém tagu (např. `v0.1.1`) automaticky sestaví a přiloží instalátor do záložky **Releases**.
-* [ ] **Vizuální háček do README (GIF / Video):**
-  * Krátký 5–10vteřinový GIF na samotném začátku `README.md`:
-    1. Zvířátko spokojeně sedí na horní hraně okna Antigravity IDE.
-    2. V bublině se ukáže text úkolu a zvířátko začne bušit do klávesnice.
-    3. Zvířátko radostně poskočí, kýchne a vyskočí barevné jiskry.
-    4. Kliknutí na ozubené kolečko (⚙️) a otevření nastavení.
+* [x] **Vizuální háček do README (GIF / Video):** ✅ *Hotovo! Vygenerován prémiový animovaný GIF s badge titulky a vložen na začátek README.md*
+  * Krátký dynamický průlet aplikací na samotném začátku `README.md` (`windows/screenshots/antigravity-pet-demo.gif`):
+    1. Synchronizace s Antigravity IDE a živé psaní promptu.
+    2. Oslava maskota při dokončení odpovědi agentem (*🎉 HOTOVO*).
+    3. Okamžitá změna druhu zvířátka kliknutím na kostku (🎲).
+    4. Rozbalení menu nastavení (⚙️) a spuštění animace DJ Tučňáka se sluchátky.
 
 ---
 
