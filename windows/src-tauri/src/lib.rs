@@ -260,7 +260,7 @@ async fn send_ide_prompt(
             let msg = if ok {
                 "Prompt byl vložen do chatu Antigravity a odeslán! 🚀".to_string()
             } else {
-                "Prompt je připraven ve schránce (Ctrl+V) 📋".to_string()
+                "Prompt je připraven ve schránce (Ctrl+V) 📋 (chat nebyl zaměřen, soubor zůstal beze změny)".to_string()
             };
             let method = if ok { "ide_ui_injection" } else { "clipboard_fallback" };
             (Some(h), ok, method, msg)

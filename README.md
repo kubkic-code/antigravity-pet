@@ -52,8 +52,10 @@
 - **1:1 Lifecycle Exit:** When an IDE window is closed, its companion waves goodbye (*"👋 Měj se hezky! Relace ukončena..."*), sparkles, and departs. When the last IDE window closes, 0 mascots remain on desktop.
 - **Window-Specific Focus:** Double-clicking any pet instantly brings that specific IDE window to the foreground (`SetForegroundWindow`). Right-clicking opens the chat overlay for that specific project.
 
-### 💬 Two-Way IDE Chat Mirror & Headless Background Agent (Ghost Mode)
-- **Ghost Mode / Background Prompt Dispatch:** Type a prompt into the mascot while Antigravity IDE is minimized or behind other apps. The prompt is injected and Antigravity is immediately minimized back to the taskbar (`SW_MINIMIZE`), while your previous foreground application and focus are instantly restored within ~150ms. You can chat with your agent without the IDE popping up over your screen!
+### 💬 Two-Way IDE Chat Mirror, Foreground Retention & Ghost Mode
+- **Foreground Window Retention:** If Antigravity IDE was already open and visible on screen (`!was_iconic`), it **STAYS OPEN and focused in the foreground** throughout and after prompt injection. It will never minimize away when you were already looking at it!
+- **Strict Code Editor Protection (Zero Overwrite of Open Files):** Dual-layer UI Automation verification checks whether the active focused element is an open code editor or document buffer (e.g. Monaco editor, `README.md`, `.rs`, `.ts`, etc.). If the chat input cannot be verified, keystrokes are **IMMEDIATELY ABORTED** before sending `Ctrl+A` or `Ctrl+V`. Your open files are 100% protected against corruption and prompts are kept safely in your clipboard!
+- **Ghost Mode (Stealth Background Dispatch):** If Antigravity IDE was minimized on the taskbar (`was_iconic`), it injects the prompt and immediately minimizes back to the taskbar (`SW_MINIMIZE`), restoring your previous application (e.g. Chrome, Terminal) within ~150ms.
 - **Direct Windows UI Automation Target Focus (`IUIAutomation`):** Prompts submitted through the mascot chat overlay target the Antigravity chat input directly via OS-level Windows UI Automation (`ControlType::ComboBox`, `Name = "Message input"`).
 - **Zero Terminal Mis-Pastes:** Calling `SetFocus()` directly on the chat element forcefully transfers OS keyboard focus out of active integrated PowerShell terminals or editor tabs into the chat textarea. Prompts are **never accidentally typed or executed into the terminal**, even if the terminal had active focus before clicking the mascot!
 - **Exact Bounding Box Hit-Testing:** Automatically queries real-time physical screen coordinates and monitor DPI, ensuring synthetic click sequences land dead-center in the input box.
@@ -187,7 +189,7 @@ npm run tauri dev
 
 ## 🧪 Automated Testing
 
-The project includes an automated test suite of **14 unit tests** in TypeScript and **15 unit tests** in Rust that validate multi-window assignment, session aliasing, settings suppression, strict 1:1 window lifecycle, UI Automation focus injection, prompt dispatch, and auto-launch:
+The project includes an automated test suite of **15 unit tests** in TypeScript and **15 unit tests** in Rust that validate multi-window assignment, session aliasing, settings suppression, strict 1:1 window lifecycle, foreground window retention, code editor protection, UI Automation focus injection, prompt dispatch, and auto-launch:
 
 ```powershell
 cd windows
@@ -212,8 +214,9 @@ Expected output:
 ✓ Test 12: Strict 1:1 window lifecycle verified: mascot removes when window closes (0 pets) & spawns on open (100% OK)
 ✓ Test 13: SessionEnd hook lifecycle verified: mascot closes on SessionEnd & multiple-pet destruction works (100% OK)
 ✓ Test 14: Pet Companion Settings & Preferences verified: toggle preferences persist and reflect across pets (100% OK)
+✓ Test 15: Foreground window retention and strict code editor protection verified (100% OK)
 
-ALL 14 MULTI-PET, CONVERSATION MIRROR, SETTINGS EXCEPTION & PET SETTINGS TESTS PASSED SUCCESSFULLY! (100% OK)
+ALL 15 MULTI-PET, CONVERSATION MIRROR, SETTINGS EXCEPTION & EDITOR PROTECTION TESTS PASSED SUCCESSFULLY! (100% OK)
 ```
 
 ---

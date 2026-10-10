@@ -24,7 +24,8 @@
   - **Zavření okna IDE:** Jakmile okno IDE zavřete, jeho zvířátko se rozloučí (*„👋 Měj se hezky! Relace ukončena...“*), zamává a elegantně odejde. Pokud zavřete i poslední okno, na ploše nezůstane žádné zvířátko.
 - **Výjimka pro Nastavení (Settings):** Otevření okna Nastavení (v IDE, v záložce nebo v nastavení Coucou) **nikdy nevytvoří falešné zvířátko „setting“** a nikdy neodstraní vaše stávající zvířátko.
 - **Čisté štítky projektů:** Pod zvířátkem se zobrazuje skutečný název projektu/složky (např. `📁 coucou-main`), otevřené soubory (`README.md`, `scraper.py`) jsou inteligentně odfiltrovány.
-- **Obousměrné zrcadlo (Chat Overlay) & Tichý režim (Ghost Mode):** Zrcadlí celou historii chatu z IDE v reálném čase a umožňuje posílat prompty přímo z plochy na pozadí, aniž by se okno IDE muselo otevírat nebo kradlo focus z prohlížeče. Okno Antigravity po odeslání zůstává minimalizované na liště (`SW_MINIMIZE`) a váš původní fokus okna je okamžitě obnoven!
+- **Obousměrné zrcadlo (Chat Overlay), Ponechání okna v popředí & Tichý režim (Ghost Mode):** Zrcadlí celou historii chatu z IDE v reálném čase. Pokud máte okno Antigravity IDE již otevřené na ploše, **zůstane celou dobu otevřené a zaměřené v popředí** (neminimalizuje se). Na lištu se minimalizuje (`SW_MINIMIZE`) pouze v případě, že bylo před odesláním promptu skutečně minimalizované na liště.
+- **Striktní ochrana otevřených souborů (žádné přepsání readme.md):** Díky dvoustupňovému ověření přes Windows UI Automation systém pozná, zda máte myší kliknuto v editoru kódu nebo dokumentu. Pokud ano a chat nebyl bezpečně zaměřen, systém **NIKDY nepošle Ctrl+A ani Ctrl+V do vašeho souboru**. Soubor zůstává 100% nedotčen a prompt se bezpečně připraví ve schránce (Ctrl+V).
 - **Dvojklik na zvířátko:** Pokud chcete Antigravity okno přivolat do popředí na celou obrazovku, stačí na zvířátko dvakrát kliknout.
 - **Bohatý autonomní život s prodlouženými animacemi (6–8,5 s):** Zvířátka v klidu tancují na retro 8-bitový beat 🎧, pískají si do kroku 🎶, dávají si kávu ☕, šlofíka 💤, svačinku 🍴, rozcvičku 🧘, loví brouky 🐛 nebo kýchají 🤧.
 - **0 % CPU v klidu & ~25 MB RAM:** Extrémně lehká desktopová aplikace postavená na Tauri v2 a Rustu.
@@ -143,10 +144,10 @@ Okno chatu je přímým a kompletním mostem mezi vaší plochou a agentem v Ant
   - Volání `SetFocus()` přímo přenese klávesový fokus z integrovaného terminálu nebo editoru rovnou do chatu agenta.
   - Text promptu se **nikdy nenapíše do terminálu ani do kódu**, i když jste před kliknutím na zvířátko pracovali v terminálu či jiné aplikaci!
   - Využívá přesné fyzické souřadnice ovládacího prvku nezávisle na rozlišení či DPI monitoru (FullHD, 2K, 4K).
-- **Tichý režim (Ghost Mode):**
-  - Můžete psát agentovi čistě přes zvířátko, zatímco jste třeba na webu v Google Chrome nebo píšete v editoru.
-  - Okno IDE se po odeslání promptu okamžitě minimalizuje zpět na hlavní panel (`SW_MINIMIZE`) a systém ihned vrátí fokus na okno, ve kterém jste předtím pracovali. Okno IDE vám tak nikdy neskáče do rozpracované práce ani nezakrývá monitor.
-  - Zvířátko začne ihned pilně kódovat na notebooku 💻 a v chatu i bublinách vidíte jeho myšlenky a postup.
+- **Ponechání okna v popředí vs. Tichý režim (Ghost Mode):**
+  - **Když je Antigravity IDE otevřené na ploše:** Pokud máte okno IDE otevřené, po odeslání promptu **zůstane celou dobu otevřené a zaměřené v popředí**. Neminimalizuje se pryč a můžete dál nerušeně sledovat práci agenta i kód.
+  - **Tichý režim (pouze při minimalizaci):** Pokud bylo Antigravity IDE před odesláním promptu zmenšené/minimalizované na liště (`was_iconic`), po odeslání se ihned vrátí zpět na lištu (`SW_MINIMIZE`) a systém vám obnoví fokus původní aplikace (např. Google Chrome nebo jiného okna).
+  - **Striktní ochrana souborů (žádné přepsání readme.md nebo kódu):** Pokud máte myší kliknuto v otevřeném souboru kódu (Monaco editor) a chat nebyl nalezen, systém operaci **okamžitě bezpečně přeruší**, do souboru nepošle žádné klávesy `Ctrl+A` ani `Ctrl+V`, soubor zůstane beze změny a prompt se bezpečně připraví ve schránce.
   - **Dvojklik na zvířátko:** Kdykoliv budete chtít IDE otevřít a zaměřit na celou obrazovku, stačí na zvířátko dvakrát kliknout myší.
 
 ---

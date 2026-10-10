@@ -1235,15 +1235,88 @@ pub fn launch_antigravity_ide(
     }
 }
 
+/// Checks if a UI Automation element is an open code editor / document buffer (e.g. Monaco Editor, README.md, etc.)
+pub fn is_element_an_editor(el: &windows::Win32::UI::Accessibility::IUIAutomationElement) -> bool {
+    use windows::Win32::UI::Accessibility::UIA_DocumentControlTypeId;
+
+    unsafe {
+        // 1. Check control type - Monaco text editor is always a Document control (50030)
+        if let Ok(ctype) = el.CurrentControlType() {
+            if ctype == UIA_DocumentControlTypeId {
+                return true;
+            }
+        }
+
+        // 2. Check class name for monaco / editor
+        if let Ok(cname) = el.CurrentClassName() {
+            let s = cname.to_string().to_lowercase();
+            if s.contains("monaco") || s.contains("editor") {
+                return true;
+            }
+        }
+
+        // 3. Check name for active file or document markers
+        if let Ok(name) = el.CurrentName() {
+            let s = name.to_string().to_lowercase();
+            let extensions = [
+                ".md", ".rs", ".ts", ".js", ".tsx", ".jsx", ".py", ".json",
+                ".toml", ".html", ".css", ".scss", ".c", ".cpp", ".h",
+                ".java", ".go", ".txt", ".yml", ".yaml", ".xml", ".sh", ".ps1", ".sql",
+            ];
+            for ext in &extensions {
+                if s.ends_with(ext)
+                    || s.contains(&format!("{ext} "))
+                    || s.contains(&format!("{ext},"))
+                    || s.contains(&format!("{ext} -"))
+                    || s.contains(&format!("{ext} —"))
+                {
+                    return true;
+                }
+            }
+            if s.contains("editor content") || s.contains("cursor at") || s.contains("line ") {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
+/// Checks if a UI Automation element is positively identified as the Antigravity chat input box.
+pub fn is_element_chat_input(el: &windows::Win32::UI::Accessibility::IUIAutomationElement) -> bool {
+    use windows::Win32::UI::Accessibility::{UIA_ComboBoxControlTypeId, UIA_EditControlTypeId};
+
+    if is_element_an_editor(el) {
+        return false;
+    }
+
+    unsafe {
+        let is_input_type = match el.CurrentControlType() {
+            Ok(ctype) => ctype == UIA_ComboBoxControlTypeId || ctype == UIA_EditControlTypeId,
+            Err(_) => false,
+        };
+
+        let name = el.CurrentName().map(|n| n.to_string().to_lowercase()).unwrap_or_default();
+        let is_chat_name = name.contains("message input")
+            || name.contains("chat input")
+            || name.contains("ask")
+            || name.contains("chat")
+            || name.contains("prompt")
+            || name.contains("agent");
+
+        is_input_type && (is_chat_name || name.is_empty())
+    }
+}
+
 /// Searches for the Antigravity IDE chat input textarea via Windows UI Automation,
-/// calls SetFocus() directly on the ComboBox element to ensure focus leaves the terminal/editor,
+/// calls SetFocus() directly on the element to ensure focus leaves the terminal/editor,
 /// and returns the physical screen center coordinates (X, Y) of the element for synthetic mouse activation.
 pub fn find_and_focus_chat_input_via_uia(target_hwnd: HWND) -> Option<(i32, i32)> {
     use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED};
     use windows::Win32::System::Variant::{VariantInit, VT_BSTR, VT_I4};
     use windows::Win32::UI::Accessibility::{
         CUIAutomation, IUIAutomation, TreeScope_Descendants,
-        UIA_ComboBoxControlTypeId, UIA_ControlTypePropertyId, UIA_NamePropertyId,
+        UIA_ComboBoxControlTypeId, UIA_ControlTypePropertyId, UIA_EditControlTypeId, UIA_NamePropertyId,
     };
     use windows::core::BSTR;
 
@@ -1253,27 +1326,23 @@ pub fn find_and_focus_chat_input_via_uia(target_hwnd: HWND) -> Option<(i32, i32)
 
         let mut win_rect = windows::Win32::Foundation::RECT::default();
         let _ = GetWindowRect(target_hwnd, &mut win_rect);
-        let win_w = win_rect.right - win_rect.left;
-        let win_h = win_rect.bottom - win_rect.top;
+        let _win_w = win_rect.right - win_rect.left;
+        let _win_h = win_rect.bottom - win_rect.top;
 
         // 1. First fast check: Is the chat input already focused?
-        // Since Ctrl+L was just sent, the chat input is often directly the focused element.
+        // Note: Strict protection against code editors! Never accept an editor element here.
         if let Ok(focused) = uia.GetFocusedElement() {
-            if let Ok(rect) = focused.CurrentBoundingRectangle() {
-                if rect.right > rect.left && rect.bottom > rect.top {
-                    let is_inside_win = rect.left >= win_rect.left - 20
-                        && rect.right <= win_rect.right + 20
-                        && rect.top >= win_rect.top - 20
-                        && rect.bottom <= win_rect.bottom + 20;
-                    // Secondary sidebar chat area is in the right 50% and lower 60% of the window
-                    let is_in_chat_quadrant = rect.left >= win_rect.left + (win_w * 4 / 10)
-                        && rect.top >= win_rect.top + (win_h * 4 / 10);
-                    if is_inside_win && is_in_chat_quadrant {
+            if is_element_an_editor(&focused) {
+                crate::log::line(
+                    "find_and_focus_chat_input_via_uia: active focused element is code editor, bypassing fast check"
+                );
+            } else if is_element_chat_input(&focused) {
+                if let Ok(rect) = focused.CurrentBoundingRectangle() {
+                    if rect.right > rect.left && rect.bottom > rect.top {
                         let cx = rect.left + (rect.right - rect.left) / 2;
                         let cy = rect.top + (rect.bottom - rect.top) / 2;
                         crate::log::line(format!(
-                            "find_and_focus_chat_input_via_uia: active focused element at ({cx}, {cy}), bounds [{}, {}, {}, {}]",
-                            rect.left, rect.top, rect.right, rect.bottom
+                            "find_and_focus_chat_input_via_uia: active focused element is verified chat input at ({cx}, {cy})"
                         ));
                         return Some((cx, cy));
                     }
@@ -1288,7 +1357,7 @@ pub fn find_and_focus_chat_input_via_uia(target_hwnd: HWND) -> Option<(i32, i32)
         let mut var_type = VariantInit();
         (*var_type.Anonymous.Anonymous).vt = VT_I4;
         (*var_type.Anonymous.Anonymous).Anonymous.lVal = UIA_ComboBoxControlTypeId.0 as i32;
-        let cond_type = uia.CreatePropertyCondition(UIA_ControlTypePropertyId, &var_type).ok()?;
+        let cond_combo = uia.CreatePropertyCondition(UIA_ControlTypePropertyId, &var_type).ok()?;
 
         // Condition 2: Name == "Message input"
         let mut var_name = VariantInit();
@@ -1297,29 +1366,47 @@ pub fn find_and_focus_chat_input_via_uia(target_hwnd: HWND) -> Option<(i32, i32)
         (*var_name.Anonymous.Anonymous).Anonymous.bstrVal = std::mem::ManuallyDrop::new(bstr);
         let cond_name = uia.CreatePropertyCondition(UIA_NamePropertyId, &var_name).ok()?;
 
-        let and_cond = uia.CreateAndCondition(&cond_type, &cond_name).ok()?;
+        let and_cond = uia.CreateAndCondition(&cond_combo, &cond_name).ok()?;
 
-        // Try exact match first
-        let found_el = match root.FindFirst(TreeScope_Descendants, &and_cond) {
-            Ok(el) => Some(el),
-            Err(_) => {
-                // Fallback: search for any ComboBox in case title is slightly different
-                root.FindFirst(TreeScope_Descendants, &cond_type).ok()
+        // Strategy A: Exact ComboBox with Name == "Message input"
+        let mut candidate_el = root.FindFirst(TreeScope_Descendants, &and_cond).ok();
+
+        // Strategy B: Edit control with Name == "Message input"
+        if candidate_el.is_none() {
+            let mut var_edit = VariantInit();
+            (*var_edit.Anonymous.Anonymous).vt = VT_I4;
+            (*var_edit.Anonymous.Anonymous).Anonymous.lVal = UIA_EditControlTypeId.0 as i32;
+            if let Ok(cond_edit) = uia.CreatePropertyCondition(UIA_ControlTypePropertyId, &var_edit) {
+                if let Ok(and_edit_cond) = uia.CreateAndCondition(&cond_edit, &cond_name) {
+                    candidate_el = root.FindFirst(TreeScope_Descendants, &and_edit_cond).ok();
+                }
             }
-        };
+        }
 
-        if let Some(el) = found_el {
-            // Explicitly transfer keyboard focus to the chat input via UI Automation
-            let _ = el.SetFocus();
-            if let Ok(rect) = el.CurrentBoundingRectangle() {
-                if rect.right > rect.left && rect.bottom > rect.top {
-                    let cx = rect.left + (rect.right - rect.left) / 2;
-                    let cy = rect.top + (rect.bottom - rect.top) / 2;
-                    crate::log::line(format!(
-                        "find_and_focus_chat_input_via_uia: focused input at ({cx}, {cy}), bounds [{}, {}, {}, {}]",
-                        rect.left, rect.top, rect.right, rect.bottom
-                    ));
-                    return Some((cx, cy));
+        // Strategy C: Any ComboBox that is not an editor
+        if candidate_el.is_none() {
+            if let Ok(combo_el) = root.FindFirst(TreeScope_Descendants, &cond_combo) {
+                if !is_element_an_editor(&combo_el) {
+                    candidate_el = Some(combo_el);
+                }
+            }
+        }
+
+        if let Some(el) = candidate_el {
+            if !is_element_an_editor(&el) {
+                // Explicitly transfer keyboard focus to the chat input via UI Automation
+                let _ = el.SetFocus();
+                std::thread::sleep(std::time::Duration::from_millis(30));
+                if let Ok(rect) = el.CurrentBoundingRectangle() {
+                    if rect.right > rect.left && rect.bottom > rect.top {
+                        let cx = rect.left + (rect.right - rect.left) / 2;
+                        let cy = rect.top + (rect.bottom - rect.top) / 2;
+                        crate::log::line(format!(
+                            "find_and_focus_chat_input_via_uia: focused verified chat input at ({cx}, {cy}), bounds [{}, {}, {}, {}]",
+                            rect.left, rect.top, rect.right, rect.bottom
+                        ));
+                        return Some((cx, cy));
+                    }
                 }
             }
         }
@@ -1452,10 +1539,37 @@ pub fn inject_prompt_to_ide(hwnd_val: isize, prompt: &str) -> bool {
 
         let (target_x, target_y) = if let Some((cx, cy)) = uia_coords {
             crate::log::line(format!(
-                "inject_prompt_to_ide: UIA focus succeeded at ({cx}, {cy})"
+                "inject_prompt_to_ide: UIA focus succeeded on verified chat input at ({cx}, {cy})"
             ));
             (cx, cy)
         } else {
+            // SAFETY SHIELD #1: If UIA could not verify the chat input element,
+            // check what currently has focus! If a code editor / document has focus,
+            // ABORT IMMEDIATELY to prevent overwriting or typing into the file!
+            use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED};
+            use windows::Win32::UI::Accessibility::{CUIAutomation, IUIAutomation};
+            let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+            if let Ok(uia) = CoCreateInstance::<_, IUIAutomation>(&CUIAutomation, None, CLSCTX_INPROC_SERVER) {
+                if let Ok(focused) = uia.GetFocusedElement() {
+                    if is_element_an_editor(&focused) {
+                        crate::log::line(
+                            "inject_prompt_to_ide: SAFETY ABORT - code editor has focus and chat input was not verified. Aborting keystrokes to protect file!"
+                        );
+                        if fg_thread != 0 && fg_thread != cur_thread {
+                            let _ = AttachThreadInput(cur_thread, fg_thread, false);
+                        }
+                        if target_thread != 0 && target_thread != cur_thread {
+                            let _ = AttachThreadInput(cur_thread, target_thread, false);
+                        }
+                        if prev_dpi != 0 {
+                            let _ = SetThreadDpiAwarenessContext(prev_dpi);
+                        }
+                        let _ = set_clipboard_text(prompt);
+                        return false;
+                    }
+                }
+            }
+
             // Fallback: calibrated geometric calculation
             let mut rect = windows::Win32::Foundation::RECT::default();
             let _ = GetWindowRect(target_hwnd, &mut rect);
@@ -1481,15 +1595,10 @@ pub fn inject_prompt_to_ide(hwnd_val: isize, prompt: &str) -> bool {
             let scale = if dpi > 0 { (dpi as f64) / 96.0 } else { 1.25 };
 
             // Horizontal offset from window right border into Secondary Side Bar chat input:
-            // Measured bounds [1562, 886, 1903, 937] in 1920x1080 window:
-            // Center is 1732 (188px from 1920 right). At 1.25 scale: 150 DIP.
             let h_offset = ((150.0 * scale).round() as i32).clamp(120, (win_w / 2).max(120));
             let gx = rect.right - h_offset;
 
             // Vertical offset from window bottom into chat textarea:
-            // Measured bounds [1562, 886, 1903, 937] in 1920x1080 window:
-            // Center is 911 (129px from 1040 bottom). At 1.25 scale: 103 DIP.
-            // Safely above the bottom panel/terminal (at >120px) and above the status bar (at >22px).
             let v_offset = ((103.0 * scale).round() as i32).clamp(
                 (80.0 * scale).round() as i32,
                 (150.0 * scale).round() as i32,
@@ -1521,6 +1630,33 @@ pub fn inject_prompt_to_ide(hwnd_val: isize, prompt: &str) -> bool {
         std::thread::sleep(std::time::Duration::from_millis(25));
         mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
         std::thread::sleep(std::time::Duration::from_millis(60));
+
+        // SAFETY SHIELD #2: Verify focus after clicks, BEFORE sending ANY keystrokes!
+        // If focus landed on a code editor / document, ABORT IMMEDIATELY!
+        use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED};
+        use windows::Win32::UI::Accessibility::{CUIAutomation, IUIAutomation};
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        if let Ok(uia) = CoCreateInstance::<_, IUIAutomation>(&CUIAutomation, None, CLSCTX_INPROC_SERVER) {
+            if let Ok(post_click_focused) = uia.GetFocusedElement() {
+                if is_element_an_editor(&post_click_focused) {
+                    crate::log::line(
+                        "inject_prompt_to_ide: SAFETY ABORT - click landed on code editor! Aborting Ctrl+A / Ctrl+V to prevent modifying file!"
+                    );
+                    let _ = SetCursorPos(original_cursor.x, original_cursor.y);
+                    if fg_thread != 0 && fg_thread != cur_thread {
+                        let _ = AttachThreadInput(cur_thread, fg_thread, false);
+                    }
+                    if target_thread != 0 && target_thread != cur_thread {
+                        let _ = AttachThreadInput(cur_thread, target_thread, false);
+                    }
+                    if prev_dpi != 0 {
+                        let _ = SetThreadDpiAwarenessContext(prev_dpi);
+                    }
+                    let _ = set_clipboard_text(prompt);
+                    return false;
+                }
+            }
+        }
 
         // Release modifier keys again before dispatching keystrokes
         keybd_event(VK_MENU.0 as u8, 0, KEYEVENTF_KEYUP, 0);
@@ -1562,9 +1698,10 @@ pub fn inject_prompt_to_ide(hwnd_val: isize, prompt: &str) -> bool {
             let _ = SetThreadDpiAwarenessContext(prev_dpi);
         }
 
-        // 15. Ghost Mode: If IDE was minimized or in background, minimize it back to taskbar
-        // and restore user's previous foreground window so the IDE does not interrupt their workflow.
-        if was_iconic || (_prev_foreground.0 as isize != 0 && _prev_foreground != target_hwnd) {
+        // 15. Ghost Mode Minimization vs Foreground Preservation:
+        // ONLY minimize back to taskbar if the IDE was genuinely minimized (iconic) before prompt injection.
+        // If the IDE was already open/visible on the desktop (!was_iconic), leave it open and focused in the foreground!
+        if was_iconic {
             std::thread::sleep(std::time::Duration::from_millis(150));
             let _ = ShowWindow(target_hwnd, SW_MINIMIZE);
             if _prev_foreground.0 as isize != 0
@@ -1574,6 +1711,10 @@ pub fn inject_prompt_to_ide(hwnd_val: isize, prompt: &str) -> bool {
                 SwitchToThisWindow(_prev_foreground, true.into());
                 let _ = SetForegroundWindow(_prev_foreground);
             }
+        } else {
+            // Target was already open on screen - keep it in the foreground!
+            SwitchToThisWindow(target_hwnd, true.into());
+            let _ = SetForegroundWindow(target_hwnd);
         }
 
         // 16. Restore original clipboard after safe delay (allowing Electron to finish reading)

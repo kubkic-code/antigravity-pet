@@ -16,10 +16,11 @@
   - **Automatic Spawning on Open:** Opening an Antigravity IDE window immediately spawns its assigned companion, which greets the user (*"👋 Ahoj! Jsem tvůj pomocník [zvířátko] pro [projekt]!"*).
   - **Multi-Window 1:1 Mapping:** Each additional IDE window gets its own distinct mascot companion (Panda, Penguin, Dog, Tiger, etc.) with a dedicated project tag.
   - **Clean Exit on Window Close:** When an IDE window is closed, its mascot waves goodbye (*"👋 Měj se hezky! Relace ukončena..."*), sparkles, fades out, and is cleanly destroyed. When the last window is closed, exactly 0 mascots remain on desktop.
-- **Headless Agent & Ghost Mode (Stealth Background Prompt Injection):**
+- **Headless Agent & Ghost Mode (Stealth Background Injection + Foreground Retention):**
   - Submitting prompts from the desktop mascot chat overlay injects directly into the Antigravity agent (Ctrl+L, Ctrl+V, Enter).
-  - If the IDE is minimized or behind other apps (`was_iconic || _prev_foreground != target_hwnd`), it immediately minimizes back to the taskbar (`ShowWindow(target_hwnd, SW_MINIMIZE)`) within ~150ms and restores the user's previous foreground window/focus.
-  - The user can prompt their AI agent seamlessly while working in Chrome, terminals, or other apps without the IDE popping up over their screen.
+  - **Foreground Window Retention:** If Antigravity IDE was already open and visible on screen (`!was_iconic`), it **STAYS OPEN and focused in the foreground**. It is NEVER minimized when you were already working with it!
+  - **Ghost Mode Stealth Background Execution:** ONLY if the IDE was genuinely minimized to the taskbar (`was_iconic`) does it minimize back (`ShowWindow(target_hwnd, SW_MINIMIZE)`) and restore the user's previous foreground window/focus within ~150ms.
+  - **Strict Code Editor Protection:** Dual-layer UI Automation verification (`is_element_an_editor`). If focus is on an open code editor or document (e.g. Monaco editor, `README.md`, `.rs`, `.ts`, etc.) and the chat input cannot be verified, keystroke injection is **IMMEDIATELY ABORTED** before sending `Ctrl+A` or `Ctrl+V`. Open files are 100% protected and never corrupted!
   - **Double-Click to Focus:** Double-clicking any pet intentionally restores and focuses that specific Antigravity IDE window to the foreground (`focusIdeWindow` / `restore_and_focus`).
 - **Settings Window Exception & Preservation:** Opening Settings (in IDE, detached tab, or Coucou settings window) **never** spawns a "setting" mascot, never overwrites an existing pet project tag, and never removes the pet.
 - **Clear Multi-Window Project Attribution:**
@@ -176,25 +177,28 @@ When a user submits a prompt via the desktop chat overlay (`chat_overlay.ts`):
 2. Rust backend resolves the target HWND (`window_finder::find_antigravity_window` or auto-launches Antigravity executable if not yet open).
 3. Backs up user's original clipboard content, mouse cursor position, and foreground window (`_prev_foreground`).
 4. Elevates the target Antigravity IDE window (`SetWindowPos HWND_TOP`, `BringWindowToTop`, `SetForegroundWindow`, `AttachThreadInput`, `AllowSetForegroundWindow(0xFFFFFFFF)`, Alt-key pulse).
-5. **Direct Windows UI Automation Focus (`find_and_focus_chat_input_via_uia`):**
+5. **Direct Windows UI Automation Focus & Dual-Layer Editor Protection (`find_and_focus_chat_input_via_uia`):**
    - Connects to Windows UI Automation via native COM (`IUIAutomation`, `CUIAutomation`).
-   - Searches for the chat textarea ComboBox (`ControlType::ComboBox` with `Name = "Message input"`).
-   - Directly calls `el.SetFocus()` on the ComboBox element. This **forcefully transfers OS keyboard focus directly to the Antigravity chat textarea**, completely preventing prompt leakage into previously focused PowerShell terminals or editor tabs!
-   - Computes the physical screen center coordinates `(cx, cy)` from `el.CurrentBoundingRectangle()`.
-6. **Synthetic Activation & Caret Placement:**
+   - Checks active focused element with `is_element_an_editor()`: if focus is currently inside a code editor/document (e.g. Monaco editor, `README.md`, `.rs`, `.ts`, etc.), bypasses the fast-focused check to prevent mistaking the editor for chat input!
+   - Searches for the chat textarea ComboBox (`ControlType::ComboBox` with `Name = "Message input"`) or Edit control (`ControlType::Edit`).
+   - Directly calls `el.SetFocus()` on the verified chat element, transferring OS keyboard focus out of terminal/editor into the chat textarea.
+   - Computes physical screen center coordinates `(cx, cy)` from `el.CurrentBoundingRectangle()`.
+6. **Synthetic Activation & Safety Shields:**
    - Moves mouse to `(cx, cy)` (or DPI-aware geometric fallback if UIA is disabled).
-   - Injects mouse click sequence to establish Chromium webview user activation.
-7. **Prompt Submission:**
-   - Dispatches `Ctrl+A` (clears existing draft/placeholder), `Ctrl+V` (pastes prompt), and `VK_RETURN` (Enter to submit to agent).
-8. **Restoration & Ghost Mode Minimization:**
+   - **Safety Shield #1 (Pre-Click):** If UIA did not verify a chat input and the focused element is a code editor, **ABORTS IMMEDIATELY** before clicking or sending keystrokes!
+   - Injects mouse click sequence (clicks 1-3) to establish Chromium webview user activation.
+   - **Safety Shield #2 (Post-Click):** Queries `GetFocusedElement()` immediately after clicks: if focus landed on a code editor (`is_element_an_editor`), **ABORTS IMMEDIATELY** before sending `Ctrl+A` or `Ctrl+V`!
+7. **Prompt Submission (Verified Chat Only):**
+   - Only when chat input is verified: dispatches `Ctrl+A` (clears existing draft), `Ctrl+V` (pastes prompt), and `VK_RETURN` (Enter to submit to agent).
+8. **Restoration & Foreground Window Retention:**
    - Immediately returns user mouse cursor to original position.
    - Cleans up thread input attachment and restores original clipboard content after 1500ms.
-   - **Ghost Mode Stealth Background Execution:** If the IDE was minimized or in the background before injection (`was_iconic || _prev_foreground != target_hwnd`):
+   - **Foreground Window Retention:** If the IDE was already open and visible on screen (`!was_iconic`), it **STAYS OPEN and in the foreground** (`SwitchToThisWindow`, `SetForegroundWindow`).
+   - **Ghost Mode Stealth Background Execution:** ONLY if the IDE was genuinely minimized to the taskbar (`was_iconic`):
      - Waits ~150ms for Electron's message queue to accept the Enter submission.
      - Calls `ShowWindow(target_hwnd, SW_MINIMIZE)` to immediately tuck the IDE window back down to the taskbar.
-     - Calls `SwitchToThisWindow(_prev_foreground, true.into())` and `SetForegroundWindow(_prev_foreground)` to restore the user's active application and keyboard focus.
-     - The user never experiences window flashing or focus stealing.
-   - **Double-Click Foreground Trigger:** If the user ever wants to view the IDE, double-clicking the mascot calls `focusIdeWindow(this.hwnd)`, which executes `restore_and_focus(hwnd)`.
+     - Calls `SwitchToThisWindow(_prev_foreground, true.into())` and `SetForegroundWindow(_prev_foreground)` to restore the user's previous foreground window/focus.
+   - **Double-Click Foreground Trigger:** Double-clicking the mascot always calls `focusIdeWindow(this.hwnd)` / `restore_and_focus(hwnd)` to bring that specific IDE window to the foreground on demand.
 
 ---
 
@@ -236,11 +240,11 @@ Node.js and Cargo are installed in user/system directories (`%USERPROFILE%\.carg
 - Specify `Cwd: "c:\\Users\\retar\\Downloads\\coucou-main\\coucou-main\\windows"`.
 - Set Cargo PATH: `$env:PATH += ";$env:USERPROFILE\.cargo\bin"`.
 
-### 1. Run Multi-Pet Unit Test Suite (14/14 tests):
+### 1. Run Multi-Pet Unit Test Suite (15/15 tests):
 ```powershell
 node scripts/test_multi_pet.mjs
 ```
-*Tests cover: initial mascot preservation, multi-window staggered spawning, distinct species assignment, HWND event aliasing, single-window cleanup, project attribution integrity, full conversation transcript mirroring, silent prompt dispatch, settings window exception, strict 1:1 window lifecycle (0 pets on close), **SessionEnd hook lifecycle**, and **Pet Companion Settings & Preferences**.*
+*Tests cover: initial mascot preservation, multi-window staggered spawning, distinct species assignment, HWND event aliasing, single-window cleanup, project attribution integrity, full conversation transcript mirroring, silent prompt dispatch, settings window exception, strict 1:1 window lifecycle (0 pets on close), **SessionEnd hook lifecycle**, **Pet Companion Settings & Preferences**, and **Foreground Window Retention & Strict Code Editor Protection**.*
 
 ### 2. Verify TypeScript & Build Frontend:
 ```powershell
@@ -266,15 +270,16 @@ Copy-Item -Force target\release\coucou-hook.exe "$env:LOCALAPPDATA\Coucou\bin\co
 ## 6. Critical Rules of Engagement for Future AI Agents
 
 1. **Strict 1:1 Window Lifecycle with Antigravity IDE (0 Windows = 0 Desktop Pets):** When no Antigravity IDE windows are open, exactly 0 mascots are on the desktop. When an Antigravity window opens, its companion spawns immediately and greets the user. When an IDE window is closed, its companion waves goodbye (*"👋 Měj se hezky!"*), fades out, and is destroyed. When the last IDE window closes, 0 mascots remain on desktop.
-2. **Preserve Ghost Mode & Focus Restoration:** Prompt injection into Antigravity IDE must never steal user focus or leave the IDE covering the user's active window. If the IDE was minimized or in background, always minimize it back to the taskbar (`ShowWindow(target_hwnd, SW_MINIMIZE)`) and restore the user's previous foreground window (`_prev_foreground`) within ~150ms.
-3. **Double-Click Intentionally Restores IDE Window:** Double-clicking any pet calls `focusIdeWindow(hwnd)` / `restore_and_focus(hwnd)` to bring that specific IDE window to the foreground on demand.
-4. **Never Break Click-Through:** Every new interactive element added to the DOM must have its bounding rect included in `pushAllHitRects()` (`main.ts`) so Tauri can register it with `set_island_rects`. Any pixel not registered MUST pass clicks through to Windows (`WS_EX_TRANSPARENT`). Note: hit-rect is pushed from per-pet `requestAnimationFrame` loops — no extra `setInterval` needed.
-5. **Never Break Multi-Pet Preservation:** Never replace an existing mascot when a new window or session is opened. Always use `getOrCreatePet()` which respects HWND aliasing and preserves the mascot's assigned species.
-6. **Never Break Preemption:** Agent activities (`working` / `thinking`) must strictly take precedence over idle activities (nap, coffee, dance, snack, whistling). Always ensure `setState("working")` cancels pending activity timeouts and mutes music (`Sound.stopAllMelodies()`). The melody-stop condition in `setState()` covers both `"dance"` and `"walk"` (whistling) as source states.
-7. **Preserve Zero-CPU Idle Architecture:** Never use continuous unconstrained `requestAnimationFrame` loops when the mascot is stationary. When idle, physics loops must sleep. Auto-suspend Web Audio contexts when silent.
-8. **No Bloated Frameworks:** Maintain the ultra-fast, zero-dependency vanilla TypeScript + HTML5 canvas architecture. Do NOT inject heavy UI libraries (React, Vue, Tailwind) into the overlay frontend.
-9. **Always Maintain Test Suite:** Run `node scripts/test_multi_pet.mjs` and `cargo test` after modifying any multi-pet, session, or window-tracking code. All **14 multi-pet tests** and **15 Rust tests** must pass 100%.
-10. **`isSettingsName`/`isSettingsWindow` are intentionally triplicated** across `src/main.ts`, `scripts/test_multi_pet.mjs`, and `src-tauri/src/window_finder.rs`. Look for the `KEEP IN SYNC` comments in each file. If you add a new locale variant (e.g. German "einstellungen"), update **all three** locations.
+2. **Preserve Foreground Retention vs Ghost Mode:** If Antigravity IDE was open on screen (`!was_iconic`), it MUST STAY OPEN and focused in the foreground. ONLY minimize back to taskbar (`SW_MINIMIZE`) if the IDE was genuinely minimized to the taskbar (`was_iconic`) before dispatch.
+3. **Strict Code Editor Protection:** NEVER dispatch `Ctrl+A` or `Ctrl+V` into an open code editor or document (e.g. `README.md`, `.rs`, `.ts`, Monaco Document). If the chat input is not verified, safety abort triggers, leaving files untouched.
+4. **Double-Click Intentionally Restores IDE Window:** Double-clicking any pet calls `focusIdeWindow(hwnd)` / `restore_and_focus(hwnd)` to bring that specific IDE window to the foreground on demand.
+5. **Never Break Click-Through:** Every new interactive element added to the DOM must have its bounding rect included in `pushAllHitRects()` (`main.ts`) so Tauri can register it with `set_island_rects`. Any pixel not registered MUST pass clicks through to Windows (`WS_EX_TRANSPARENT`). Note: hit-rect is pushed from per-pet `requestAnimationFrame` loops — no extra `setInterval` needed.
+6. **Never Break Multi-Pet Preservation:** Never replace an existing mascot when a new window or session is opened. Always use `getOrCreatePet()` which respects HWND aliasing and preserves the mascot's assigned species.
+7. **Never Break Preemption:** Agent activities (`working` / `thinking`) must strictly take precedence over idle activities (nap, coffee, dance, snack, whistling). Always ensure `setState("working")` cancels pending activity timeouts and mutes music (`Sound.stopAllMelodies()`). The melody-stop condition in `setState()` covers both `"dance"` and `"walk"` (whistling) as source states.
+8. **Preserve Zero-CPU Idle Architecture:** Never use continuous unconstrained `requestAnimationFrame` loops when the mascot is stationary. When idle, physics loops must sleep. Auto-suspend Web Audio contexts when silent.
+9. **No Bloated Frameworks:** Maintain the ultra-fast, zero-dependency vanilla TypeScript + HTML5 canvas architecture. Do NOT inject heavy UI libraries (React, Vue, Tailwind) into the overlay frontend.
+10. **Always Maintain Test Suite:** Run `node scripts/test_multi_pet.mjs` and `cargo test` after modifying any multi-pet, session, or window-tracking code. All **15 multi-pet tests** and **15 Rust tests** must pass 100%.
+11. **`isSettingsName`/`isSettingsWindow` are intentionally triplicated** across `src/main.ts`, `scripts/test_multi_pet.mjs`, and `src-tauri/src/window_finder.rs`. Look for the `KEEP IN SYNC` comments in each file. If you add a new locale variant (e.g. German "einstellungen"), update **all three** locations.
 
 ---
 
