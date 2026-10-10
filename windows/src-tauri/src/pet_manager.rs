@@ -403,14 +403,29 @@ pub fn route_hook_event(app: &AppHandle, payload: &mut Value) {
     // Emit event globally to all listening pets
     let _ = app.emit("hook", &payload);
 
-    // If session ended, remove after 5 seconds
+    // If session ended, only remove if this was a transient headless/CLI session without a live window
     if event == "SessionEnd" {
         let app_handle = app.clone();
         let sid = session_id.to_string();
         tauri::async_runtime::spawn(async move {
             tokio::time::sleep(Duration::from_secs(5)).await;
             if let Some(m) = app_handle.try_state::<PetManager>() {
-                m.remove_session(&app_handle, &sid);
+                let has_live_window = m
+                    .sessions
+                    .lock()
+                    .unwrap()
+                    .get(&sid)
+                    .and_then(|s| s.hwnd)
+                    .map(|h| {
+                        use windows::Win32::Foundation::HWND;
+                        use windows::Win32::UI::WindowsAndMessaging::IsWindow;
+                        unsafe { IsWindow(Some(HWND(h as *mut _))).as_bool() }
+                    })
+                    .unwrap_or(false);
+
+                if !has_live_window {
+                    m.remove_session(&app_handle, &sid);
+                }
             }
         });
     }

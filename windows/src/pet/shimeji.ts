@@ -29,7 +29,7 @@ export function cleanProjectBadge(projectName?: string | null, windowTitle?: str
 
   // Check if projectName was mistakenly set to a file or settings
   const isFileOrSettings =
-    /\.(md|rs|ts|tsx|js|jsx|json|py|html|css|toml|yaml|yml|sh|txt|png|svg|ico)$/i.test(trimmed) ||
+    /\.(md|rs|ts|tsx|js|jsx|json|py|html|css|scss|toml|yaml|yml|sh|txt|png|svg|ico)$/i.test(trimmed) ||
     /^untitled-\d+$/i.test(trimmed) ||
     /^(welcome|settings|setting|nastavení|nastaveni|preferences|preference|předvolby|predvolby|dockerfile|makefile)$/i.test(trimmed);
 
@@ -1020,10 +1020,24 @@ export class ShimejiPet {
       }
     });
 
-    window.addEventListener("mouseup", () => {
+    window.addEventListener("mouseup", (e) => {
       if (this.isDragging) {
         this.isDragging = false;
-        this.velocityY = 0; // Let gravity pull it down
+        const dx = e.clientX - this.dragStartX;
+        const dy = e.clientY - this.dragStartY;
+        const isClick = Math.hypot(dx, dy) < 6;
+
+        if (isClick) {
+          // Cheerful click interaction: small hop and pop sound
+          this.setState("idle");
+          this.jump(-5);
+          Sound.play("pop");
+          this.spawnSparkle("✨");
+        } else if (this.y >= this.getGroundY() && this.state === "drag") {
+          // Dropped at ground level: restore idle state immediately
+          this.setState("idle");
+        }
+        this.velocityY = 0; // Let gravity pull it down if dropped in mid-air
         this.pushHitRect();
       }
     });

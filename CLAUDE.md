@@ -240,11 +240,11 @@ Node.js and Cargo are installed in user/system directories (`%USERPROFILE%\.carg
 - Specify `Cwd: "c:\\Users\\retar\\Downloads\\coucou-main\\coucou-main\\windows"`.
 - Set Cargo PATH: `$env:PATH += ";$env:USERPROFILE\.cargo\bin"`.
 
-### 1. Run Multi-Pet Unit Test Suite (15/15 tests):
+### 1. Run Multi-Pet Unit Test Suite (17/17 tests):
 ```powershell
 node scripts/test_multi_pet.mjs
 ```
-*Tests cover: initial mascot preservation, multi-window staggered spawning, distinct species assignment, HWND event aliasing, single-window cleanup, project attribution integrity, full conversation transcript mirroring, silent prompt dispatch, settings window exception, strict 1:1 window lifecycle (0 pets on close), **SessionEnd hook lifecycle**, **Pet Companion Settings & Preferences**, and **Foreground Window Retention & Strict Code Editor Protection**.*
+*Tests cover: initial mascot preservation, multi-window staggered spawning, distinct species assignment, HWND event aliasing, single-window cleanup, project attribution integrity, full conversation transcript mirroring, silent prompt dispatch, settings window exception, strict 1:1 window lifecycle (0 pets on close), **SessionEnd hook lifecycle (preserving pets with open IDE windows)**, **lastActiveSession fallback cleanup**, **Pet Companion Settings & Preferences**, and **Foreground Window Retention & Strict Code Editor Protection**.*
 
 ### 2. Verify TypeScript & Build Frontend:
 ```powershell
@@ -257,7 +257,7 @@ $env:PATH += ";$env:USERPROFILE\.cargo\bin"; npm run build
 $env:PATH += ";$env:USERPROFILE\.cargo\bin"; cargo test --manifest-path src-tauri\Cargo.toml -- --test-threads=1
 $env:PATH += ";$env:USERPROFILE\.cargo\bin"; cargo check --manifest-path src-tauri\Cargo.toml
 ```
-*Runs all 15 backend unit tests (including UIA COM discovery, CLI discovery, and auto-launch) with 100% green output.*
+*Runs all 15 backend unit tests (including UIA COM discovery, CLI discovery, auto-launch, and AllowSetForegroundWindow bypass) with 100% green output.*
 
 ### 4. Build and Deploy Hook Binary:
 ```powershell
@@ -270,16 +270,17 @@ Copy-Item -Force target\release\coucou-hook.exe "$env:LOCALAPPDATA\Coucou\bin\co
 ## 6. Critical Rules of Engagement for Future AI Agents
 
 1. **Strict 1:1 Window Lifecycle with Antigravity IDE (0 Windows = 0 Desktop Pets):** When no Antigravity IDE windows are open, exactly 0 mascots are on the desktop. When an Antigravity window opens, its companion spawns immediately and greets the user. When an IDE window is closed, its companion waves goodbye (*"👋 Měj se hezky!"*), fades out, and is destroyed. When the last IDE window closes, 0 mascots remain on desktop.
-2. **Preserve Foreground Retention vs Ghost Mode:** If Antigravity IDE was open on screen (`!was_iconic`), it MUST STAY OPEN and focused in the foreground. ONLY minimize back to taskbar (`SW_MINIMIZE`) if the IDE was genuinely minimized to the taskbar (`was_iconic`) before dispatch.
-3. **Strict Code Editor Protection:** NEVER dispatch `Ctrl+A` or `Ctrl+V` into an open code editor or document (e.g. `README.md`, `.rs`, `.ts`, Monaco Document). If the chat input is not verified, safety abort triggers, leaving files untouched.
-4. **Double-Click Intentionally Restores IDE Window:** Double-clicking any pet calls `focusIdeWindow(hwnd)` / `restore_and_focus(hwnd)` to bring that specific IDE window to the foreground on demand.
-5. **Never Break Click-Through:** Every new interactive element added to the DOM must have its bounding rect included in `pushAllHitRects()` (`main.ts`) so Tauri can register it with `set_island_rects`. Any pixel not registered MUST pass clicks through to Windows (`WS_EX_TRANSPARENT`). Note: hit-rect is pushed from per-pet `requestAnimationFrame` loops — no extra `setInterval` needed.
-6. **Never Break Multi-Pet Preservation:** Never replace an existing mascot when a new window or session is opened. Always use `getOrCreatePet()` which respects HWND aliasing and preserves the mascot's assigned species.
-7. **Never Break Preemption:** Agent activities (`working` / `thinking`) must strictly take precedence over idle activities (nap, coffee, dance, snack, whistling). Always ensure `setState("working")` cancels pending activity timeouts and mutes music (`Sound.stopAllMelodies()`). The melody-stop condition in `setState()` covers both `"dance"` and `"walk"` (whistling) as source states.
-8. **Preserve Zero-CPU Idle Architecture:** Never use continuous unconstrained `requestAnimationFrame` loops when the mascot is stationary. When idle, physics loops must sleep. Auto-suspend Web Audio contexts when silent.
-9. **No Bloated Frameworks:** Maintain the ultra-fast, zero-dependency vanilla TypeScript + HTML5 canvas architecture. Do NOT inject heavy UI libraries (React, Vue, Tailwind) into the overlay frontend.
-10. **Always Maintain Test Suite:** Run `node scripts/test_multi_pet.mjs` and `cargo test` after modifying any multi-pet, session, or window-tracking code. All **15 multi-pet tests** and **15 Rust tests** must pass 100%.
-11. **`isSettingsName`/`isSettingsWindow` are intentionally triplicated** across `src/main.ts`, `scripts/test_multi_pet.mjs`, and `src-tauri/src/window_finder.rs`. Look for the `KEEP IN SYNC` comments in each file. If you add a new locale variant (e.g. German "einstellungen"), update **all three** locations.
+2. **SessionEnd Hook Protects Open IDE Windows:** `SessionEnd` hooks (signaling agent completion) must never destroy companions that have an open IDE window (`hwnd != null`). Pets only depart when the window itself physically closes (`session-removed`).
+3. **Preserve Foreground Retention vs Ghost Mode:** If Antigravity IDE was open on screen (`!was_iconic`), it MUST STAY OPEN and focused in the foreground. ONLY minimize back to taskbar (`SW_MINIMIZE`) if the IDE was genuinely minimized to the taskbar (`was_iconic`) before dispatch.
+4. **Strict Code Editor Protection:** NEVER dispatch `Ctrl+A` or `Ctrl+V` into an open code editor or document (e.g. `README.md`, `.rs`, `.ts`, Monaco Document). If the chat input is not verified, safety abort triggers, leaving files untouched.
+5. **Double-Click Intentionally Restores IDE Window:** Double-clicking any pet calls `focusIdeWindow(hwnd)` / `restore_and_focus(hwnd)` with `AllowSetForegroundWindow` and `SwitchToThisWindow` to bring that specific IDE window to the foreground on demand with 100% reliability.
+6. **Never Break Click-Through:** Every new interactive element added to the DOM must have its bounding rect included in `pushAllHitRects()` (`main.ts`) so Tauri can register it with `set_island_rects`. Any pixel not registered MUST pass clicks through to Windows (`WS_EX_TRANSPARENT`). Note: hit-rect is pushed from per-pet `requestAnimationFrame` loops — no extra `setInterval` needed.
+7. **Never Break Multi-Pet Preservation:** Never replace an existing mascot when a new window or session is opened. Always use `getOrCreatePet()` which respects HWND aliasing and preserves the mascot's assigned species.
+8. **Never Break Preemption:** Agent activities (`working` / `thinking`) must strictly take precedence over idle activities (nap, coffee, dance, snack, whistling). Always ensure `setState("working")` cancels pending activity timeouts and mutes music (`Sound.stopAllMelodies()`). The melody-stop condition in `setState()` covers both `"dance"` and `"walk"` (whistling) as source states.
+9. **Preserve Zero-CPU Idle Architecture:** Never use continuous unconstrained `requestAnimationFrame` loops when the mascot is stationary. When idle, physics loops must sleep. Auto-suspend Web Audio contexts when silent.
+10. **No Bloated Frameworks:** Maintain the ultra-fast, zero-dependency vanilla TypeScript + HTML5 canvas architecture. Do NOT inject heavy UI libraries (React, Vue, Tailwind) into the overlay frontend.
+11. **Always Maintain Test Suite:** Run `node scripts/test_multi_pet.mjs` and `cargo test` after modifying any multi-pet, session, or window-tracking code. All **17 multi-pet tests** and **15 Rust tests** must pass 100%.
+12. **`isSettingsName`/`isSettingsWindow` are intentionally triplicated** across `src/main.ts`, `scripts/test_multi_pet.mjs`, and `src-tauri/src/window_finder.rs`. Look for the `KEEP IN SYNC` comments in each file. If you add a new locale variant (e.g. German "einstellungen"), update **all three** locations.
 
 ---
 

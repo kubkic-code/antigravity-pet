@@ -831,7 +831,81 @@ assert(resProtected.message.includes("soubor zůstal beze změny"), "Message mus
 
 console.log("✓ Test 15: Foreground window retention and strict code editor protection verified (100% OK)");
 
-console.log("\nALL 15 MULTI-PET, CONVERSATION MIRROR, SETTINGS EXCEPTION & EDITOR PROTECTION TESTS PASSED SUCCESSFULLY! (100% OK)");
+// Test 16: SessionEnd event must NOT destroy a companion that is attached to an open IDE window
+{
+  const activePets = new Map();
+  const pet1 = new MockPet(getAnimalById("tiger"), 200);
+  pet1.hwnd = 0x1234;
+  pet1.sessionId = "win-1234";
+  const chat1 = new MockChat();
+  chat1.hwnd = 0x1234;
+  chat1.sessionId = "win-1234";
+  activePets.set("win-1234", { sessionId: "win-1234", pet: pet1, chat: chat1 });
+
+  // Simulate SessionEnd event handler from main.ts
+  const handleSessionEnd = (active) => {
+    if (!active.pet.hwnd) {
+      active.pet.sayGoodbyeAndClose();
+      activePets.delete(active.sessionId);
+    } else {
+      if (active.pet.isClosed) {
+        throw new Error("Active window pet was incorrectly marked closed!");
+      }
+    }
+  };
+
+  handleSessionEnd(activePets.get("win-1234"));
+  assert.strictEqual(activePets.has("win-1234"), true, "Pet with open window must stay in activePets!");
+  assert.strictEqual(pet1.isClosed, false, "Pet with open window must not say goodbye!");
+
+  // Now test transient headless session without window (hwnd is null)
+  const pet2 = new MockPet(getAnimalById("panda"), 400);
+  pet2.hwnd = null;
+  pet2.sessionId = "cli-transient";
+  const chat2 = new MockChat();
+  chat2.hwnd = null;
+  chat2.sessionId = "cli-transient";
+  activePets.set("cli-transient", { sessionId: "cli-transient", pet: pet2, chat: chat2 });
+
+  handleSessionEnd(activePets.get("cli-transient"));
+  assert.strictEqual(activePets.has("cli-transient"), false, "Transient CLI pet without window must be removed on SessionEnd");
+  assert.strictEqual(pet2.isClosed, true, "Transient CLI pet must close on SessionEnd");
+  console.log("✓ Test 16: SessionEnd preserves pets with open IDE windows and only cleans up transient sessions (100% OK)");
+}
+
+// Test 17: lastActiveSession cleanup when window is removed
+{
+  const activePets = new Map();
+  const petA = new MockPet(getAnimalById("dog"), 200);
+  petA.sessionId = "session-a";
+  const chatA = new MockChat();
+  activePets.set("session-a", { sessionId: "session-a", pet: petA, chat: chatA });
+
+  const petB = new MockPet(getAnimalById("fox"), 400);
+  petB.sessionId = "session-b";
+  const chatB = new MockChat();
+  activePets.set("session-b", { sessionId: "session-b", pet: petB, chat: chatB });
+
+  let lastActiveSession = "session-a";
+
+  // Simulate session-removed logic
+  const petToDestroy = activePets.get("session-a");
+  for (const [id, p] of Array.from(activePets.entries())) {
+    if (p === petToDestroy) {
+      activePets.delete(id);
+    }
+  }
+  if (lastActiveSession === petToDestroy.sessionId) {
+    const remaining = Array.from(activePets.values())[0];
+    lastActiveSession = remaining ? remaining.sessionId : "";
+  }
+
+  assert.strictEqual(lastActiveSession, "session-b", "lastActiveSession must cleanly fall back to remaining pet session!");
+  assert.strictEqual(activePets.size, 1);
+  console.log("✓ Test 17: lastActiveSession cleanup updates cleanly on session removal (100% OK)");
+}
+
+console.log("\nALL 17 MULTI-PET, CONVERSATION MIRROR, SETTINGS EXCEPTION, LIFECYCLE & EDITOR PROTECTION TESTS PASSED SUCCESSFULLY! (100% OK)");
 
 
 

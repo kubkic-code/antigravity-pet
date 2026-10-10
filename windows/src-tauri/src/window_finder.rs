@@ -779,12 +779,34 @@ pub fn restore_and_focus(hwnd_val: isize) -> bool {
             let _ = AttachThreadInput(cur_thread, target_thread, true);
         }
 
+        let _ = AllowSetForegroundWindow(0xFFFFFFFF);
+
         // Pulse ALT key (VK_MENU) to grant foreground activation privilege
         keybd_event(VK_MENU.0 as u8, 0, Default::default(), 0);
         keybd_event(VK_MENU.0 as u8, 0, KEYEVENTF_KEYUP, 0);
 
+        SwitchToThisWindow(hwnd, true.into());
+        let _ = SetWindowPos(
+            hwnd,
+            Some(HWND_TOP),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
+        );
         let _ = BringWindowToTop(hwnd);
         let success = SetForegroundWindow(hwnd).as_bool();
+
+        // Ensure target window is foreground with small retry loop
+        for _ in 0..5 {
+            if GetForegroundWindow() == hwnd {
+                break;
+            }
+            SwitchToThisWindow(hwnd, true.into());
+            let _ = SetForegroundWindow(hwnd);
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
 
         // Cleanup thread attachments
         if fore_thread != 0 && fore_thread != cur_thread {
@@ -794,7 +816,7 @@ pub fn restore_and_focus(hwnd_val: isize) -> bool {
             let _ = AttachThreadInput(cur_thread, target_thread, false);
         }
 
-        success
+        success || GetForegroundWindow() == hwnd
     }
 }
 

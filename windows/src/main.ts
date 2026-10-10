@@ -388,6 +388,10 @@ async function main() {
           activePets.delete(id);
         }
       }
+      if (lastActiveSession === petToDestroy.sessionId) {
+        const remaining = Array.from(activePets.values())[0];
+        lastActiveSession = remaining ? remaining.sessionId : "";
+      }
       pushAllHitRects();
       window.setTimeout(() => {
         petToDestroy.chat.destroy();
@@ -468,18 +472,31 @@ async function main() {
     }
 
     if (eventName === "SessionEnd") {
-      active.pet.sayGoodbyeAndClose();
-      const petToDestroy = active;
-      for (const [id, p] of Array.from(activePets.entries())) {
-        if (p === petToDestroy) {
-          activePets.delete(id);
+      // If companion has a live IDE window, do not destroy it — companion lives with the window!
+      if (!active.pet.hwnd) {
+        active.pet.sayGoodbyeAndClose();
+        const petToDestroy = active;
+        for (const [id, p] of Array.from(activePets.entries())) {
+          if (p === petToDestroy) {
+            activePets.delete(id);
+          }
         }
+        if (lastActiveSession === petToDestroy.sessionId) {
+          const remaining = Array.from(activePets.values())[0];
+          lastActiveSession = remaining ? remaining.sessionId : "";
+        }
+        pushAllHitRects();
+        window.setTimeout(() => {
+          petToDestroy.chat.destroy();
+          petToDestroy.pet.destroy();
+        }, 5500);
+      } else {
+        if (active.pet.getState() !== "idle") {
+          active.pet.setState("idle");
+          active.pet.hideBubble();
+        }
+        active.chat.updateStatus("idle", "Připraven");
       }
-      pushAllHitRects();
-      window.setTimeout(() => {
-        petToDestroy.chat.destroy();
-        petToDestroy.pet.destroy();
-      }, 5500);
     }
   });
 

@@ -956,7 +956,7 @@ export class ChatOverlay {
 
     // 1. Separate code blocks to protect them from inline markdown parsing
     const codeBlocks: string[] = [];
-    let text = raw.replace(/```([a-zA-Z0-9_-]*)\n([\s\S]*?)```/g, (_match, lang, code) => {
+    let text = raw.replace(/```([a-zA-Z0-9_-]*)[^\S\r\n]*\r?\n([\s\S]*?)```/g, (_match, lang, code) => {
       const idx = codeBlocks.length;
       const escapedCode = this.escapeHtml(code.trim());
       const safeLang = this.escapeHtml(lang.trim() || "code");
@@ -984,10 +984,10 @@ export class ChatOverlay {
     text = text.replace(/^>\s+(.+)$/gm, '<blockquote class="chat-md-quote">$1</blockquote>');
 
     // 5. Unordered lists: lines starting with - or *
-    text = text.replace(/(?:^[ \t]*[-*]\s+.+(?:\n|$))+/gm, (listBlock) => {
+    text = text.replace(/(?:^[ \t]*[-*]\s+.+(?:\r?\n|$))+/gm, (listBlock) => {
       const items = listBlock
         .trim()
-        .split("\n")
+        .split(/\r?\n/)
         .map((line) => {
           const content = line.replace(/^[ \t]*[-*]\s+/, "");
           return `<li>${content}</li>`;
@@ -997,10 +997,10 @@ export class ChatOverlay {
     });
 
     // 6. Ordered lists: lines starting with 1. 2. etc.
-    text = text.replace(/(?:^[ \t]*\d+\.\s+.+(?:\n|$))+/gm, (listBlock) => {
+    text = text.replace(/(?:^[ \t]*\d+\.\s+.+(?:\r?\n|$))+/gm, (listBlock) => {
       const items = listBlock
         .trim()
-        .split("\n")
+        .split(/\r?\n/)
         .map((line) => {
           const content = line.replace(/^[ \t]*\d+\.\s+/, "");
           return `<li>${content}</li>`;
@@ -1010,27 +1010,27 @@ export class ChatOverlay {
     });
 
     // 7. Inline code: `code`
-    text = text.replace(/`([^`\n]+)`/g, '<code class="chat-inline-code">$1</code>');
+    text = text.replace(/`([^`\r\n]+)`/g, '<code class="chat-inline-code">$1</code>');
 
-    // 8. Bold and Italic: **bold**, *italic*
+    // 8. Bold and Italic: **bold**, __bold__, *italic*, _italic_
     text = text.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+    text = text.replace(/__([^_]+)__/g, "<strong>$1</strong>");
     text = text.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, "<em>$1</em>");
+    text = text.replace(/(?<!_)_([^_]+)_(?!_)/g, "<em>$1</em>");
 
     // 9. Links: [text](url)
     text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a class="chat-link" href="$2" target="_blank" rel="noopener">$1</a>');
 
     // 10. Horizontal rule: ---
-    text = text.replace(/^---$/gm, '<hr class="chat-md-hr">');
+    text = text.replace(/^---[^\S\r\n]*\r?$/gm, '<hr class="chat-md-hr">');
 
     // 11. Line breaks: preserve single line breaks within regular text
-    text = text.replace(/\n(?!(?:<\/?(ul|ol|li|blockquote|div|pre|code|hr)))/g, "<br>");
+    text = text.replace(/\r?\n(?!(?:<\/?(ul|ol|li|blockquote|div|pre|code|hr)))/g, "<br>");
 
-    // 12. Re-insert protected code blocks
+    // 12. Re-insert protected code blocks cleanly
     codeBlocks.forEach((block, idx) => {
-      text = text.replace(`%%CODEBLOCK_${idx}%%`, block);
-      text = text.replace(`<br>%%CODEBLOCK_${idx}%%<br>`, block);
-      text = text.replace(`%%CODEBLOCK_${idx}%%<br>`, block);
-      text = text.replace(`<br>%%CODEBLOCK_${idx}%%`, block);
+      const token = `%%CODEBLOCK_${idx}%%`;
+      text = text.replace(new RegExp(`(?:<br>)?${token}(?:<br>)?`, "g"), block);
     });
 
     return text.trim();
@@ -1205,10 +1205,13 @@ export class ChatOverlay {
       }
     });
 
-    // Copy code button click delegation
+    // Copy code button & external link click delegation
     this.messagesEl.addEventListener("click", async (e) => {
       const target = e.target as HTMLElement;
-      if (target && target.classList.contains("chat-code-copy-btn")) {
+      if (!target) return;
+
+      // Handle copy code button
+      if (target.classList.contains("chat-code-copy-btn")) {
         const card = target.closest(".chat-code-card");
         const codeEl = card?.querySelector("pre code");
         if (codeEl) {
@@ -1224,6 +1227,15 @@ export class ChatOverlay {
             console.error("Clipboard copy error:", err);
           }
         }
+        return;
+      }
+
+      // Handle external links -> open in default browser
+      const link = target.closest("a.chat-link") as HTMLAnchorElement | null;
+      if (link && link.href) {
+        e.preventDefault();
+        Bridge.openUrl(link.href).catch((err) => console.error("Bridge.openUrl error:", err));
+        return;
       }
     });
 
