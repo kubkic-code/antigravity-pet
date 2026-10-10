@@ -131,7 +131,20 @@ export const Bridge = {
     call<TranscriptMetadata>("get_transcript_metadata", {
       sessionId: sessionId ?? null,
     }),
+
+  /** Gets currently active Antigravity IDE sessions discovered by the window monitor */
+  getActiveSessions: () => call<PetSession[]>("get_active_sessions"),
 };
+
+export interface PetSession {
+  session_id: string;
+  window_label: string;
+  animal_id: string;
+  hwnd?: number | null;
+  cwd?: string | null;
+  window_title?: string | null;
+  project_name?: string | null;
+}
 
 export interface ChatHistoryMessage {
   id: string;

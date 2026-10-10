@@ -236,17 +236,6 @@ class PetRegistry {
         }
       }
     }
-    const uniquePets = this.getUniquePets();
-    // CRITICAL SAFEGUARD: Never destroy the last remaining mascot on the desktop!
-    // If only one pet exists, it should simply become an idle desktop companion.
-    if (uniquePets.length <= 1) {
-      if (targetPet) {
-        targetPet.pet.hwnd = null;
-        targetPet.chat.hwnd = null;
-        targetPet.pet.setProjectInfo(null, null);
-      }
-      return;
-    }
     if (targetPet) {
       targetPet.pet.sayGoodbyeAndClose();
       targetPet.chat.destroy();
@@ -536,11 +525,12 @@ assert.strictEqual(registry.getUniquePets().length, petCountBeforeSettings, "No 
 
 console.log("✓ Test 11: Settings window exception verified: opening settings never spawns a 'setting' mascot (100% OK)");
 
-// 12. Single Pet Preservation & Settings Safety Test (User Request: mascot must never disappear when opening Settings or closing last window)
+// 12. Strict 1:1 Window Lifecycle & Settings Safety Test
+// Verifies that opening Settings tab does not rename project or spawn false mascots,
+// and closing the IDE window removes the mascot (sayGoodbyeAndClose, activePets = 0).
 const isolatedRegistry = new PetRegistry();
-// User starts with 1 mascot
 const singlePet = isolatedRegistry.getOrCreatePet("session-user", "panda", 0x9000, "coucou-main", "coucou-main - Antigravity IDE");
-assert.strictEqual(isolatedRegistry.getUniquePets().length, 1, "Must have 1 mascot");
+assert.strictEqual(isolatedRegistry.getUniquePets().length, 1, "Must have 1 mascot when IDE window is open");
 
 // User opens Settings in the IDE (window title changes to Settings)
 const samePetSettings = isolatedRegistry.getOrCreatePet("session-user", undefined, 0x9000, "Settings", "Settings - Antigravity IDE");
@@ -548,22 +538,19 @@ assert.strictEqual(isolatedRegistry.getUniquePets().length, 1, "Must STILL have 
 assert.strictEqual(samePetSettings.pet.isClosed, false, "Mascot must NOT be closed");
 assert.strictEqual(samePetSettings.pet.projectName, "coucou-main", "Project name must remain coucou-main, not Settings");
 
-// If window unbinds or closes, the mascot must NOT be destroyed because it is the only pet!
+// When the window closes, the mascot waves goodbye and is cleanly removed (0 pets remaining)
 isolatedRegistry.removeSession("session-user", 0x9000);
-assert.strictEqual(isolatedRegistry.getUniquePets().length, 1, "Last mascot MUST NOT be destroyed!");
-assert.strictEqual(singlePet.pet.isClosed, false, "Single pet must NOT be closed when window closes");
-assert.strictEqual(singlePet.pet.hwnd, null, "HWND is unbound so it acts as idle desktop companion");
+assert.strictEqual(isolatedRegistry.getUniquePets().length, 0, "1:1 Lifecycle: Mascot is removed when window closes (0 pets on desktop)!");
+assert.strictEqual(singlePet.pet.isClosed, true, "Mascot says goodbye and closes");
 
-// When a new window opens, the existing idle pet is adopted instead of spawning a duplicate
-const adoptedPet = isolatedRegistry.getOrCreatePet("session-reopened", "tiger", 0x9500, "coucou-main", "coucou-main - Antigravity IDE");
-assert.strictEqual(isolatedRegistry.getUniquePets().length, 1, "Reopened window adopts idle mascot (still 1 mascot)");
-assert.strictEqual(adoptedPet.pet.getAnimal().id, "panda", "Original pet animal species (Panda) preserved");
-assert.strictEqual(adoptedPet.pet.hwnd, 0x9500, "Rebound to new HWND");
+// When a new window opens, a new companion is spawned cleanly
+const reopenedPet = isolatedRegistry.getOrCreatePet("session-reopened", "tiger", 0x9500, "coucou-main", "coucou-main - Antigravity IDE");
+assert.strictEqual(isolatedRegistry.getUniquePets().length, 1, "Reopened window spawns mascot (1 mascot)");
+assert.strictEqual(reopenedPet.pet.hwnd, 0x9500, "Bound to new HWND");
 
+console.log("✓ Test 12: Strict 1:1 window lifecycle verified: mascot removes when window closes (0 pets) & spawns on open (100% OK)");
 
-console.log("✓ Test 12: Single pet preservation verified: mascot NEVER disappears when opening settings or unbinding window (100% OK)");
-
-// 13. SessionEnd Hook Safeguard Test (Bug fix: main.ts SessionEnd path lacked last-pet protection)
+// 13. SessionEnd Hook Lifecycle Test
 // Simulates what main.ts does when it receives hook event with hook_event_name === "SessionEnd"
 class MockMainSessionEnd {
   constructor() {
@@ -589,22 +576,11 @@ class MockMainSessionEnd {
     return entry;
   }
 
-  // Mirrors the SessionEnd branch from main.ts (after bug fix)
+  // Mirrors the SessionEnd branch from main.ts (1:1 lifecycle: mascot says goodbye and is destroyed)
   handleSessionEnd(sessionId) {
     const active = this.activePets.get(sessionId);
     if (!active) return;
 
-    const uniquePets = this.getUniquePets();
-    // CRITICAL SAFEGUARD: Never destroy the last remaining mascot on the desktop!
-    if (uniquePets.length <= 1) {
-      active.pet.hwnd = null;
-      active.chat.hwnd = null;
-      active.pet.setProjectInfo(null, null);
-      active.chat.setProjectInfo(null, null);
-      return; // pet stays alive as idle desktop companion
-    }
-
-    // Multiple pets: destroy the one that SessionEnd belongs to
     active.pet.sayGoodbyeAndClose();
     active.chat.destroy();
     active.pet.destroy();
@@ -614,14 +590,13 @@ class MockMainSessionEnd {
   }
 }
 
-// Scenario A: Only 1 pet active — SessionEnd must NOT destroy it
+// Scenario A: Single session ends — mascot says goodbye and closes (0 pets on desktop)
 const seRegistry1 = new MockMainSessionEnd();
 const sePet1 = seRegistry1.spawnPet("session-se-1", 0xA000, "my-project");
 assert.strictEqual(seRegistry1.getUniquePets().length, 1, "Start with 1 pet");
 seRegistry1.handleSessionEnd("session-se-1");
-assert.strictEqual(seRegistry1.getUniquePets().length, 1, "SAFEGUARD: Single pet must survive SessionEnd");
-assert.strictEqual(sePet1.pet.isClosed, false, "Pet must NOT be closed/destroyed");
-assert.strictEqual(sePet1.pet.hwnd, null, "HWND cleared so pet becomes idle desktop companion");
+assert.strictEqual(seRegistry1.getUniquePets().length, 0, "1:1 Lifecycle: SessionEnd cleanly removes last pet (0 pets)");
+assert.strictEqual(sePet1.pet.isClosed, true, "Pet must be closed/destroyed");
 
 // Scenario B: 2 pets active — SessionEnd correctly destroys the right one
 const seRegistry2 = new MockMainSessionEnd();
@@ -633,7 +608,7 @@ assert.strictEqual(seRegistry2.getUniquePets().length, 1, "After SessionEnd: 1 p
 assert.strictEqual(sePetA.pet.isClosed, false, "Pet A must still be alive");
 assert.strictEqual(sePetB.pet.isClosed, true, "Pet B (SessionEnd target) must be destroyed");
 
-console.log("✓ Test 13: SessionEnd hook safeguard verified: last pet survives, multiple-pet destruction works correctly (100% OK)");
+console.log("✓ Test 13: SessionEnd hook lifecycle verified: mascot closes on SessionEnd & multiple-pet destruction works (100% OK)");
 
 // 14. Pet Companion Settings & Animation/Sound Preferences Test (Grill-Me Implementation)
 // Verifies user settings module: default presets, animation toggles, interval pacing,

@@ -136,14 +136,15 @@ async function main() {
     hwnd?: number,
     projectName?: string,
     windowTitle?: string,
-  ): ActivePet {
+  ): ActivePet | null {
     // EXCEPTION: Never spawn a pet companion for a Settings window
     if (isSettingsWindow(windowTitle, projectName)) {
       const existing =
         activePets.get(sessionId) ||
         (hwnd ? Array.from(activePets.values()).find((p) => p.pet.hwnd === hwnd) : undefined);
       if (existing) return existing;
-      return activePets.get(lastActiveSession) ?? Array.from(activePets.values())[0] ?? initialPet;
+      const fallback = activePets.get(lastActiveSession) ?? Array.from(activePets.values())[0];
+      return fallback ?? null;
     }
 
     lastActiveSession = sessionId;
@@ -272,23 +273,39 @@ async function main() {
     const newActive: ActivePet = { sessionId, pet, chat };
     activePets.set(sessionId, newActive);
 
-    // If there is already at least one companion, play greet sound and introduce the new companion
+    // Play greet sound and introduce companion
     if (uniquePets.length >= 1) {
       Sound.play("greet");
       pet.showBubble("👋 Nový parťák!", `Jsem ${animal.name} pro tvoje další okno!`);
+    } else {
+      Sound.play("greet");
+      const name = projectName || "Antigravity IDE";
+      pet.showBubble("👋 Ahoj!", `Jsem tvůj pomocník ${animal.name} pro ${name}!`);
     }
 
     pushAllHitRects();
     return newActive;
   }
 
-  // Create initial mascot with a randomized animal
-  const randomInitialAnimal = ANIMAL_LIST[Math.floor(Math.random() * ANIMAL_LIST.length)];
-  const initialPet = getOrCreatePet(
-    urlSession || "default",
-    urlAnimal || randomInitialAnimal,
-    urlHwnd || undefined,
-  );
+  // Load any sessions already running (or urlSession if passed)
+  if (urlSession) {
+    getOrCreatePet(urlSession, urlAnimal || undefined, urlHwnd || undefined);
+  } else {
+    const activeSessions = await Bridge.getActiveSessions();
+    if (activeSessions && activeSessions.length > 0) {
+      for (const s of activeSessions) {
+        if (!isSettingsWindow(s.window_title, s.project_name)) {
+          getOrCreatePet(
+            s.session_id,
+            s.animal_id,
+            s.hwnd ?? undefined,
+            s.project_name ?? undefined,
+            s.window_title ?? undefined,
+          );
+        }
+      }
+    }
+  }
 
   function refreshPetLabels() {
     const uniquePets = Array.from(new Set(activePets.values()));
@@ -315,6 +332,7 @@ async function main() {
       return;
     }
     const active = getOrCreatePet(data.sessionId, data.animalId, data.hwnd, data.projectName, data.windowTitle);
+    if (!active) return;
     if (data.hwnd) {
       active.pet.hwnd = data.hwnd;
       active.chat.hwnd = data.hwnd;
@@ -362,30 +380,18 @@ async function main() {
         }
       }
     }
-    const uniquePets = Array.from(new Set(activePets.values()));
-    // CRITICAL SAFEGUARD: Never destroy the last remaining mascot on the desktop!
-    // If only one pet exists, it should simply become an idle desktop companion.
-    if (uniquePets.length <= 1) {
-      if (targetPet) {
-        targetPet.pet.hwnd = null;
-        targetPet.chat.hwnd = null;
-        targetPet.pet.setProjectInfo(null, null);
-        targetPet.chat.setProjectInfo(null, null);
-      }
-      return;
-    }
     if (targetPet) {
       targetPet.pet.sayGoodbyeAndClose();
       const petToDestroy = targetPet;
+      for (const [id, p] of Array.from(activePets.entries())) {
+        if (p === petToDestroy) {
+          activePets.delete(id);
+        }
+      }
+      pushAllHitRects();
       window.setTimeout(() => {
         petToDestroy.chat.destroy();
         petToDestroy.pet.destroy();
-        for (const [id, p] of Array.from(activePets.entries())) {
-          if (p === petToDestroy) {
-            activePets.delete(id);
-          }
-        }
-        pushAllHitRects();
       }, 5500);
     }
   });
@@ -410,7 +416,10 @@ async function main() {
   });
 
   if (State.focusTask) {
-    initialPet.pet.syncWithTask(State.focusTask);
+    const focusPet = activePets.get(lastActiveSession) ?? Array.from(activePets.values())[0];
+    if (focusPet) {
+      focusPet.pet.syncWithTask(State.focusTask);
+    }
   }
 
   // 6. Hook routing for Antigravity events
@@ -431,6 +440,7 @@ async function main() {
         : undefined);
 
     const active = getOrCreatePet(sessionId, undefined, hwnd, hookProject);
+    if (!active) return;
     if (hookProject) {
       active.pet.setProjectInfo(hookProject);
     }
@@ -458,41 +468,33 @@ async function main() {
     }
 
     if (eventName === "SessionEnd") {
-      // CRITICAL SAFEGUARD: Never destroy the last remaining mascot on the desktop!
-      // (Mirrors the same protection in the session-removed event handler)
-      const uniquePetsNow = Array.from(new Set(activePets.values()));
-      if (uniquePetsNow.length <= 1) {
-        active.pet.hwnd = null;
-        active.chat.hwnd = null;
-        active.pet.setProjectInfo(null, null);
-        active.chat.setProjectInfo(null, null);
-        return;
-      }
       active.pet.sayGoodbyeAndClose();
       const petToDestroy = active;
+      for (const [id, p] of Array.from(activePets.entries())) {
+        if (p === petToDestroy) {
+          activePets.delete(id);
+        }
+      }
+      pushAllHitRects();
       window.setTimeout(() => {
         petToDestroy.chat.destroy();
         petToDestroy.pet.destroy();
-        for (const [id, p] of Array.from(activePets.entries())) {
-          if (p === petToDestroy) {
-            activePets.delete(id);
-          }
-        }
-        pushAllHitRects();
       }, 5500);
     }
   });
 
   // 7. Tray event handlers
   await onEvent<string>("tray", (what) => {
-    const active = activePets.get(lastActiveSession) ?? initialPet;
+    const active = activePets.get(lastActiveSession) ?? Array.from(activePets.values())[0];
     switch (what) {
       case "settings":
         void Bridge.openSettingsWindow();
         break;
       case "open":
-        active.pet.showBubble("👋 Ahoj!", `Jsem tvůj pomocník ${active.pet.getAnimal().name}!`);
-        Sound.play("greet");
+        if (active) {
+          active.pet.showBubble("👋 Ahoj!", `Jsem tvůj pomocník ${active.pet.getAnimal().name}!`);
+          Sound.play("greet");
+        }
         break;
       case "toggle_focus":
         for (const p of activePets.values()) {
@@ -525,7 +527,8 @@ async function main() {
       return;
     }
 
-    const active = activePets.get(lastActiveSession) ?? initialPet;
+    const active = activePets.get(lastActiveSession) ?? Array.from(activePets.values())[0];
+    if (!active) return;
 
     switch (e.key) {
       case "1":

@@ -11,13 +11,13 @@ use windows::Win32::System::Threading::{
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     keybd_event, mouse_event, KEYEVENTF_KEYUP, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP,
-    VK_CONTROL, VK_MENU, VK_RETURN, VK_V,
+    VK_CONTROL, VK_LWIN, VK_MENU, VK_RETURN, VK_SHIFT, VK_V,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     BringWindowToTop, EnumWindows, GetClassNameW, GetCursorPos, GetForegroundWindow,
     GetWindowRect, GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindow, IsWindowVisible,
     SetCursorPos, SetForegroundWindow, SetWindowPos, ShowWindow, HWND_TOP, SWP_NOMOVE, SWP_NOSIZE,
-    SWP_SHOWWINDOW, SW_RESTORE, SW_SHOW,
+    SWP_SHOWWINDOW, SW_MINIMIZE, SW_RESTORE, SW_SHOW,
 };
 
 #[derive(Clone, Debug, Serialize)]
@@ -535,6 +535,7 @@ extern "system" {
     fn SetThreadDpiAwarenessContext(dpiContext: isize) -> isize;
     fn GetDpiForWindow(hwnd: HWND) -> u32;
     fn AllowSetForegroundWindow(dwProcessId: u32) -> i32;
+    fn SwitchToThisWindow(hwnd: HWND, fAltTab: BOOL);
 }
 
 pub fn ensure_default_desktop() {
@@ -705,13 +706,21 @@ pub fn enumerate_all_ide_windows() -> Vec<IdeWindowInfo> {
     ctx.windows
 }
 
-/// Checks if the given Win32 window handle is still valid and not destroyed.
+/// Checks if the given Win32 window handle is still valid, visible, and belongs to an IDE process.
 pub fn is_window_valid(hwnd_val: isize) -> bool {
     if hwnd_val == 0 {
         return false;
     }
     let hwnd = HWND(hwnd_val as *mut _);
-    unsafe { IsWindow(Some(hwnd)).as_bool() }
+    unsafe {
+        if !IsWindow(Some(hwnd)).as_bool() {
+            return false;
+        }
+        if !IsWindowVisible(hwnd).as_bool() {
+            return false;
+        }
+        is_window_ide_process(hwnd_val)
+    }
 }
 
 /// Checks if an HWND belongs to an active Antigravity IDE / VS Code process and is still a valid window.
@@ -730,10 +739,7 @@ pub fn is_window_ide_process(hwnd_val: isize) -> bool {
             return false;
         }
         let path = get_process_image_path(pid).unwrap_or_default().to_lowercase();
-        path.contains("antigravity")
-            || path.contains("code")
-            || path.contains("cursor")
-            || path.contains("electron")
+        is_ide_process(&path)
     }
 }
 
@@ -922,7 +928,6 @@ pub fn find_user_foreground_window(target_ide_hwnd: HWND) -> Option<HWND> {
 }
 
 /// Finds the Antigravity IDE CLI executable (`antigravity-ide.cmd`).
-#[allow(dead_code)]
 pub fn find_antigravity_cli_path() -> Option<std::path::PathBuf> {
     // 1. Check LOCALAPPDATA / ProgramFiles standard install locations
     if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
@@ -968,6 +973,268 @@ pub fn find_antigravity_cli_path() -> Option<std::path::PathBuf> {
     None
 }
 
+/// Locates Antigravity executable via Windows Registry (App Paths, Classes, Uninstall)
+fn find_antigravity_from_registry() -> Option<std::path::PathBuf> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let queries = [
+            r#"HKCU\Software\Microsoft\Windows\CurrentVersion\App Paths\Antigravity IDE.exe"#,
+            r#"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\Antigravity IDE.exe"#,
+            r#"HKCU\Software\Classes\Applications\Antigravity IDE.exe\shell\open\command"#,
+            r#"HKLM\SOFTWARE\Classes\Applications\Antigravity IDE.exe\shell\open\command"#,
+        ];
+        for q in &queries {
+            if let Ok(output) = std::process::Command::new("reg")
+                .args(&["query", q, "/ve"])
+                .creation_flags(0x08000000) // CREATE_NO_WINDOW
+                .output()
+            {
+                if output.status.success() {
+                    let text = String::from_utf8_lossy(&output.stdout);
+                    for line in text.lines() {
+                        if line.contains("REG_SZ") {
+                            let parts: Vec<&str> = line.split("REG_SZ").collect();
+                            if parts.len() > 1 {
+                                let mut raw = parts[1].trim();
+                                if raw.starts_with('"') {
+                                    if let Some(end) = raw[1..].find('"') {
+                                        raw = &raw[1..=end];
+                                    }
+                                }
+                                let p = std::path::PathBuf::from(raw);
+                                if p.exists() {
+                                    return Some(p);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Locates the Antigravity IDE GUI executable or CLI launcher on Windows.
+pub fn find_antigravity_executable() -> Option<std::path::PathBuf> {
+    // 1. Check LOCALAPPDATA standard install locations
+    if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
+        let candidates = [
+            std::path::PathBuf::from(&local_app_data)
+                .join("Programs")
+                .join("Antigravity IDE")
+                .join("Antigravity IDE.exe"),
+            std::path::PathBuf::from(&local_app_data)
+                .join("Programs")
+                .join("antigravity")
+                .join("antigravity.exe"),
+            std::path::PathBuf::from(&local_app_data)
+                .join("Programs")
+                .join("Antigravity")
+                .join("Antigravity.exe"),
+            std::path::PathBuf::from(&local_app_data)
+                .join("Programs")
+                .join("Antigravity IDE")
+                .join("bin")
+                .join("antigravity-ide.cmd"),
+            std::path::PathBuf::from(&local_app_data)
+                .join("Programs")
+                .join("antigravity")
+                .join("bin")
+                .join("antigravity.cmd"),
+        ];
+        for c in &candidates {
+            if c.exists() {
+                return Some(c.clone());
+            }
+        }
+    }
+
+    // 2. Check USERPROFILE
+    if let Ok(user_profile) = std::env::var("USERPROFILE") {
+        let p = std::path::PathBuf::from(&user_profile)
+            .join("AppData")
+            .join("Local")
+            .join("Programs")
+            .join("Antigravity IDE")
+            .join("Antigravity IDE.exe");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+
+    // 3. Check ProgramFiles
+    if let Ok(pf) = std::env::var("ProgramFiles") {
+        let candidates = [
+            std::path::PathBuf::from(&pf)
+                .join("Antigravity IDE")
+                .join("Antigravity IDE.exe"),
+            std::path::PathBuf::from(&pf)
+                .join("antigravity")
+                .join("antigravity.exe"),
+            std::path::PathBuf::from(&pf)
+                .join("Antigravity")
+                .join("Antigravity.exe"),
+            std::path::PathBuf::from(&pf)
+                .join("Antigravity IDE")
+                .join("bin")
+                .join("antigravity-ide.cmd"),
+        ];
+        for c in &candidates {
+            if c.exists() {
+                return Some(c.clone());
+            }
+        }
+    }
+
+    // 4. Check ProgramFiles(x86)
+    if let Ok(pfx86) = std::env::var("ProgramFiles(x86)") {
+        let candidates = [
+            std::path::PathBuf::from(&pfx86)
+                .join("Antigravity IDE")
+                .join("Antigravity IDE.exe"),
+            std::path::PathBuf::from(&pfx86)
+                .join("antigravity")
+                .join("antigravity.exe"),
+            std::path::PathBuf::from(&pfx86)
+                .join("Antigravity")
+                .join("Antigravity.exe"),
+        ];
+        for c in &candidates {
+            if c.exists() {
+                return Some(c.clone());
+            }
+        }
+    }
+
+    // 5. Check Windows Registry
+    if let Some(reg_path) = find_antigravity_from_registry() {
+        if reg_path.exists() {
+            return Some(reg_path);
+        }
+    }
+
+    // 6. Check PATH environment variable
+    if let Some(paths) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&paths) {
+            let names = [
+                "Antigravity IDE.exe",
+                "antigravity.exe",
+                "antigravity-ide.cmd",
+                "antigravity.cmd",
+                "agy.cmd",
+                "agy.exe",
+                "antigravity-ide",
+            ];
+            for name in &names {
+                let p = dir.join(name);
+                if p.exists() {
+                    return Some(p);
+                }
+            }
+        }
+    }
+
+    // 7. Fallback to CLI finder
+    find_antigravity_cli_path()
+}
+
+/// Automatically launches Antigravity IDE (if closed) and waits for its top-level window to initialize.
+/// Returns the newly opened HWND, or None if launch failed/timed out.
+pub fn launch_antigravity_ide(
+    workspace_dir: Option<&str>,
+    project_filter: Option<&str>,
+) -> Option<isize> {
+    crate::log::line(format!(
+        "launch_antigravity_ide: attempting to launch IDE (workspace_dir={:?}, project_filter={:?})",
+        workspace_dir, project_filter
+    ));
+
+    let exe_path = match find_antigravity_executable() {
+        Some(p) => p,
+        None => {
+            crate::log::line("launch_antigravity_ide: no Antigravity executable found on system");
+            return None;
+        }
+    };
+    crate::log::line(format!(
+        "launch_antigravity_ide: found executable at {:?}",
+        exe_path
+    ));
+
+    let is_cmd = exe_path
+        .extension()
+        .map_or(false, |ext| ext.eq_ignore_ascii_case("cmd") || ext.eq_ignore_ascii_case("bat"));
+
+    let mut cmd = if is_cmd {
+        let mut c = std::process::Command::new("cmd.exe");
+        c.arg("/c").arg(&exe_path);
+        c
+    } else {
+        std::process::Command::new(&exe_path)
+    };
+
+    if let Some(dir) = workspace_dir {
+        if !dir.trim().is_empty() && std::path::Path::new(dir).exists() {
+            cmd.arg(dir);
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        if is_cmd {
+            cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        }
+    }
+
+    match cmd.spawn() {
+        Ok(child) => {
+            crate::log::line(format!(
+                "launch_antigravity_ide: process spawned successfully (pid={})",
+                child.id()
+            ));
+        }
+        Err(err) => {
+            crate::log::line(format!("launch_antigravity_ide: failed to spawn process: {err}"));
+            return None;
+        }
+    }
+
+    // Wait for the window to appear (up to 20 seconds)
+    let start = std::time::Instant::now();
+    let timeout = std::time::Duration::from_secs(20);
+    let poll_interval = std::time::Duration::from_millis(300);
+
+    let mut discovered_hwnd: Option<isize> = None;
+    while start.elapsed() < timeout {
+        std::thread::sleep(poll_interval);
+        if let Some(h) = find_antigravity_window(None, project_filter)
+            .or_else(|| find_antigravity_window(None, None))
+        {
+            if is_window_valid(h) {
+                discovered_hwnd = Some(h);
+                break;
+            }
+        }
+    }
+
+    if let Some(hwnd) = discovered_hwnd {
+        crate::log::line(format!(
+            "launch_antigravity_ide: discovered newly opened IDE window 0x{:X} after {:.2}s",
+            hwnd,
+            start.elapsed().as_secs_f64()
+        ));
+        // Give Electron webview, workbench, and chat extension time to finish mounting and registering hotkeys
+        std::thread::sleep(std::time::Duration::from_millis(2500));
+        Some(hwnd)
+    } else {
+        crate::log::line("launch_antigravity_ide: timed out waiting for Antigravity IDE window");
+        None
+    }
+}
+
 /// Searches for the Antigravity IDE chat input textarea via Windows UI Automation,
 /// calls SetFocus() directly on the ComboBox element to ensure focus leaves the terminal/editor,
 /// and returns the physical screen center coordinates (X, Y) of the element for synthetic mouse activation.
@@ -983,6 +1250,38 @@ pub fn find_and_focus_chat_input_via_uia(target_hwnd: HWND) -> Option<(i32, i32)
     unsafe {
         let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
         let uia: IUIAutomation = CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER).ok()?;
+
+        let mut win_rect = windows::Win32::Foundation::RECT::default();
+        let _ = GetWindowRect(target_hwnd, &mut win_rect);
+        let win_w = win_rect.right - win_rect.left;
+        let win_h = win_rect.bottom - win_rect.top;
+
+        // 1. First fast check: Is the chat input already focused?
+        // Since Ctrl+L was just sent, the chat input is often directly the focused element.
+        if let Ok(focused) = uia.GetFocusedElement() {
+            if let Ok(rect) = focused.CurrentBoundingRectangle() {
+                if rect.right > rect.left && rect.bottom > rect.top {
+                    let is_inside_win = rect.left >= win_rect.left - 20
+                        && rect.right <= win_rect.right + 20
+                        && rect.top >= win_rect.top - 20
+                        && rect.bottom <= win_rect.bottom + 20;
+                    // Secondary sidebar chat area is in the right 50% and lower 60% of the window
+                    let is_in_chat_quadrant = rect.left >= win_rect.left + (win_w * 4 / 10)
+                        && rect.top >= win_rect.top + (win_h * 4 / 10);
+                    if is_inside_win && is_in_chat_quadrant {
+                        let cx = rect.left + (rect.right - rect.left) / 2;
+                        let cy = rect.top + (rect.bottom - rect.top) / 2;
+                        crate::log::line(format!(
+                            "find_and_focus_chat_input_via_uia: active focused element at ({cx}, {cy}), bounds [{}, {}, {}, {}]",
+                            rect.left, rect.top, rect.right, rect.bottom
+                        ));
+                        return Some((cx, cy));
+                    }
+                }
+            }
+        }
+
+        // 2. Search root element tree
         let root = uia.ElementFromHandle(target_hwnd).ok()?;
 
         // Condition 1: ControlType == ComboBox
@@ -1033,10 +1332,11 @@ pub fn find_and_focus_chat_input_via_uia(target_hwnd: HWND) -> Option<(i32, i32)
 /// 2. Places prompt into Windows Clipboard.
 /// 3. Locates the target Antigravity IDE window and restores it if minimized.
 /// 4. Targets the chat input box located in the Secondary Side Bar (bottom-right of IDE window).
-/// 5. Clicks the input textarea (focusing it cleanly WITHOUT toggling the sidebar or affecting open files).
-/// 6. Sends Ctrl+A, Ctrl+V, and Enter to paste and submit the prompt to the Antigravity Agent.
-/// 7. Restores the user's original mouse position and foreground window.
-/// 8. Restores original clipboard content asynchronously after dispatch.
+/// 5. Focuses chat input via Ctrl+L (antigravity.toggleChatFocus) to leave terminal/editor completely.
+/// 6. Clicks the input textarea (ensuring caret is in the webview).
+/// 7. Sends Ctrl+A, Ctrl+V, and Enter to paste and submit the prompt to the Antigravity Agent.
+/// 8. Restores the user's original mouse position and foreground window.
+/// 9. Restores original clipboard content asynchronously after dispatch.
 pub fn inject_prompt_to_ide(hwnd_val: isize, prompt: &str) -> bool {
     ensure_default_desktop();
     // 1. Resolve target Antigravity IDE window handle
@@ -1044,8 +1344,10 @@ pub fn inject_prompt_to_ide(hwnd_val: isize, prompt: &str) -> bool {
         HWND(hwnd_val as *mut _)
     } else if let Some(found_hwnd) = find_antigravity_window(None, None) {
         HWND(found_hwnd as *mut _)
+    } else if let Some(launched_hwnd) = launch_antigravity_ide(None, None) {
+        HWND(launched_hwnd as *mut _)
     } else {
-        crate::log::line("inject_prompt_to_ide: no valid Antigravity IDE window found");
+        crate::log::line("inject_prompt_to_ide: no valid Antigravity IDE window found and auto-launch failed");
         let _ = set_clipboard_text(prompt);
         return false;
     };
@@ -1073,9 +1375,10 @@ pub fn inject_prompt_to_ide(hwnd_val: isize, prompt: &str) -> bool {
         let prev_dpi = SetThreadDpiAwarenessContext(-4); // DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
 
         // 4. If minimized, restore so controls and message loop are active
-        if IsIconic(target_hwnd).as_bool() {
+        let was_iconic = IsIconic(target_hwnd).as_bool();
+        if was_iconic {
             let _ = ShowWindow(target_hwnd, SW_RESTORE);
-            std::thread::sleep(std::time::Duration::from_millis(100));
+            std::thread::sleep(std::time::Duration::from_millis(120));
         } else {
             let _ = ShowWindow(target_hwnd, SW_SHOW);
         }
@@ -1105,6 +1408,7 @@ pub fn inject_prompt_to_ide(hwnd_val: isize, prompt: &str) -> bool {
         keybd_event(VK_MENU.0 as u8, 0, KEYEVENTF_KEYUP, 0);
 
         // Physically bring window to the top of Z-order above all other windows
+        SwitchToThisWindow(target_hwnd, true.into());
         let _ = SetWindowPos(
             target_hwnd,
             Some(HWND_TOP),
@@ -1117,12 +1421,33 @@ pub fn inject_prompt_to_ide(hwnd_val: isize, prompt: &str) -> bool {
         let _ = BringWindowToTop(target_hwnd);
         let _ = SetForegroundWindow(target_hwnd);
 
-        // Allow Electron / Chromium compositor to wake up and process WM_ACTIVATE
-        std::thread::sleep(std::time::Duration::from_millis(150));
+        // Ensure target window is foreground with small retry loop
+        for _ in 0..5 {
+            if GetForegroundWindow() == target_hwnd {
+                break;
+            }
+            SwitchToThisWindow(target_hwnd, true.into());
+            let _ = SetForegroundWindow(target_hwnd);
+            std::thread::sleep(std::time::Duration::from_millis(30));
+        }
 
-        // 6. Focus chat input and determine target coordinates.
-        // UI Automation directly commands Electron to transfer keyboard focus from
-        // active editors/terminals to the chat input ComboBox, eliminating terminal mis-pastes.
+        // Release any stuck modifier keys
+        keybd_event(VK_MENU.0 as u8, 0, KEYEVENTF_KEYUP, 0);
+        keybd_event(VK_SHIFT.0 as u8, 0, KEYEVENTF_KEYUP, 0);
+        keybd_event(VK_CONTROL.0 as u8, 0, KEYEVENTF_KEYUP, 0);
+        keybd_event(VK_LWIN.0 as u8, 0, KEYEVENTF_KEYUP, 0);
+        std::thread::sleep(std::time::Duration::from_millis(30));
+
+        // 6. NATIVE FOCUS COMMAND: Send Ctrl + L (antigravity.toggleChatFocus, primary: 2090)
+        // This unconditionally shifts keyboard focus from the integrated terminal or editor
+        // directly into the Antigravity Agent chat input box, guaranteed!
+        keybd_event(VK_CONTROL.0 as u8, 0, Default::default(), 0);
+        keybd_event(b'L', 0, Default::default(), 0);
+        keybd_event(b'L', 0, KEYEVENTF_KEYUP, 0);
+        keybd_event(VK_CONTROL.0 as u8, 0, KEYEVENTF_KEYUP, 0);
+        std::thread::sleep(std::time::Duration::from_millis(80));
+
+        // 7. Verify/focus via UI Automation
         let uia_coords = find_and_focus_chat_input_via_uia(target_hwnd);
 
         let (target_x, target_y) = if let Some((cx, cy)) = uia_coords {
@@ -1131,7 +1456,7 @@ pub fn inject_prompt_to_ide(hwnd_val: isize, prompt: &str) -> bool {
             ));
             (cx, cy)
         } else {
-            // Fallback: geometric DPI-aware calculation if UIA is unavailable
+            // Fallback: calibrated geometric calculation
             let mut rect = windows::Win32::Foundation::RECT::default();
             let _ = GetWindowRect(target_hwnd, &mut rect);
             let win_w = rect.right - rect.left;
@@ -1155,64 +1480,76 @@ pub fn inject_prompt_to_ide(hwnd_val: isize, prompt: &str) -> bool {
             let dpi = GetDpiForWindow(target_hwnd);
             let scale = if dpi > 0 { (dpi as f64) / 96.0 } else { 1.25 };
 
-            let h_offset = ((155.0 * scale).round() as i32).clamp(100, (win_w / 2).max(100));
+            // Horizontal offset from window right border into Secondary Side Bar chat input:
+            // Measured bounds [1562, 886, 1903, 937] in 1920x1080 window:
+            // Center is 1732 (188px from 1920 right). At 1.25 scale: 150 DIP.
+            let h_offset = ((150.0 * scale).round() as i32).clamp(120, (win_w / 2).max(120));
             let gx = rect.right - h_offset;
 
-            let v_offset = (90.0 * scale).round() as i32;
-            let v_min = (72.0 * scale).round() as i32;
-            let v_max = (112.0 * scale).round() as i32;
-            let v_offset = v_offset.clamp(v_min, v_max);
+            // Vertical offset from window bottom into chat textarea:
+            // Measured bounds [1562, 886, 1903, 937] in 1920x1080 window:
+            // Center is 911 (129px from 1040 bottom). At 1.25 scale: 103 DIP.
+            // Safely above the bottom panel/terminal (at >120px) and above the status bar (at >22px).
+            let v_offset = ((103.0 * scale).round() as i32).clamp(
+                (80.0 * scale).round() as i32,
+                (150.0 * scale).round() as i32,
+            );
             let gy = rect.bottom - v_offset;
 
             crate::log::line(format!(
-                "inject_prompt_to_ide: UIA fallback to geometric calculation at ({gx}, {gy}) in rect [{}, {}, {}, {}]",
-                rect.left, rect.top, rect.right, rect.bottom
+                "inject_prompt_to_ide: calibrated geometric target at ({gx}, {gy}) in rect [{}, {}, {}, {}] (scale={:.2})",
+                rect.left, rect.top, rect.right, rect.bottom, scale
             ));
             (gx, gy)
         };
 
-        // 7. Click directly into the chat input textarea to activate caret in webview
+        // 8. Click directly into the chat input textarea to activate caret in webview
         let _ = SetCursorPos(target_x, target_y);
         std::thread::sleep(std::time::Duration::from_millis(40));
         // Click 1: activates frame/webview
         mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
         std::thread::sleep(std::time::Duration::from_millis(25));
         mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
-        std::thread::sleep(std::time::Duration::from_millis(40));
+        std::thread::sleep(std::time::Duration::from_millis(35));
         // Click 2: focuses the input textarea element
         mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
         std::thread::sleep(std::time::Duration::from_millis(25));
         mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
-        std::thread::sleep(std::time::Duration::from_millis(40));
+        std::thread::sleep(std::time::Duration::from_millis(35));
         // Click 3: ensures caret is inside the text input
         mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
         std::thread::sleep(std::time::Duration::from_millis(25));
         mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
-        std::thread::sleep(std::time::Duration::from_millis(80));
+        std::thread::sleep(std::time::Duration::from_millis(60));
 
-        // 8. Select all in case there is existing text (Ctrl + A)
+        // Release modifier keys again before dispatching keystrokes
+        keybd_event(VK_MENU.0 as u8, 0, KEYEVENTF_KEYUP, 0);
+        keybd_event(VK_SHIFT.0 as u8, 0, KEYEVENTF_KEYUP, 0);
+        keybd_event(VK_CONTROL.0 as u8, 0, KEYEVENTF_KEYUP, 0);
+
+        // 9. Select all in case there is existing text (Ctrl + A)
         keybd_event(VK_CONTROL.0 as u8, 0, Default::default(), 0);
         keybd_event(b'A', 0, Default::default(), 0);
         keybd_event(b'A', 0, KEYEVENTF_KEYUP, 0);
         keybd_event(VK_CONTROL.0 as u8, 0, KEYEVENTF_KEYUP, 0);
         std::thread::sleep(std::time::Duration::from_millis(40));
 
-        // 9. Paste user's prompt (Ctrl + V)
+        // 10. Paste user's prompt (Ctrl + V)
         keybd_event(VK_CONTROL.0 as u8, 0, Default::default(), 0);
         keybd_event(VK_V.0 as u8, 0, Default::default(), 0);
         keybd_event(VK_V.0 as u8, 0, KEYEVENTF_KEYUP, 0);
         keybd_event(VK_CONTROL.0 as u8, 0, KEYEVENTF_KEYUP, 0);
-        std::thread::sleep(std::time::Duration::from_millis(80));
+        std::thread::sleep(std::time::Duration::from_millis(100));
 
-        // 10. Submit prompt to agent (Enter)
+        // 11. Submit prompt to agent (Enter)
         keybd_event(VK_RETURN.0 as u8, 0, Default::default(), 0);
         keybd_event(VK_RETURN.0 as u8, 0, KEYEVENTF_KEYUP, 0);
         std::thread::sleep(std::time::Duration::from_millis(150));
 
-        // 11. Restore user's mouse cursor immediately
+        // 12. Restore user's mouse cursor immediately
         let _ = SetCursorPos(original_cursor.x, original_cursor.y);
 
-        // 12. Detach thread inputs
+        // 13. Detach thread inputs
         if fg_thread != 0 && fg_thread != cur_thread {
             let _ = AttachThreadInput(cur_thread, fg_thread, false);
         }
@@ -1220,15 +1557,26 @@ pub fn inject_prompt_to_ide(hwnd_val: isize, prompt: &str) -> bool {
             let _ = AttachThreadInput(cur_thread, target_thread, false);
         }
 
-        // 13. Restore previous DPI context
+        // 14. Restore previous DPI context
         if prev_dpi != 0 {
             let _ = SetThreadDpiAwarenessContext(prev_dpi);
         }
 
-        // 14. Keep focus on Antigravity IDE so user and agent can immediately see response
-        // (Do NOT prematurely steal focus back to prev_foreground which interrupts Electron submission)
+        // 15. Ghost Mode: If IDE was minimized or in background, minimize it back to taskbar
+        // and restore user's previous foreground window so the IDE does not interrupt their workflow.
+        if was_iconic || (_prev_foreground.0 as isize != 0 && _prev_foreground != target_hwnd) {
+            std::thread::sleep(std::time::Duration::from_millis(150));
+            let _ = ShowWindow(target_hwnd, SW_MINIMIZE);
+            if _prev_foreground.0 as isize != 0
+                && IsWindow(Some(_prev_foreground)).as_bool()
+                && _prev_foreground != target_hwnd
+            {
+                SwitchToThisWindow(_prev_foreground, true.into());
+                let _ = SetForegroundWindow(_prev_foreground);
+            }
+        }
 
-        // 15. Restore original clipboard after safe delay (allowing Electron to finish reading)
+        // 16. Restore original clipboard after safe delay (allowing Electron to finish reading)
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(1500));
             if let Some(ref prev_clip) = original_clipboard {
@@ -1349,6 +1697,24 @@ mod tests {
             let target_hwnd = HWND(hwnd_val as *mut _);
             let coords = find_and_focus_chat_input_via_uia(target_hwnd);
             assert!(coords.is_some());
+        }
+    }
+
+    #[test]
+    fn test_find_antigravity_executable() {
+        let exe = find_antigravity_executable();
+        if let Some(ref p) = exe {
+            println!("Found Antigravity executable: {:?}", p);
+            assert!(p.exists(), "Discovered path must exist on disk");
+        }
+    }
+
+    #[test]
+    fn test_find_antigravity_cli_path() {
+        let cli = find_antigravity_cli_path();
+        if let Some(ref p) = cli {
+            println!("Found Antigravity CLI script: {:?}", p);
+            assert!(p.exists(), "Discovered CLI path must exist on disk");
         }
     }
 }

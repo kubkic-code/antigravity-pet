@@ -40,19 +40,20 @@
 
 ## 🌟 Key Features
 
-### 👥 Multi-Pet Engine (1 Window = 1 Mascot)
-- **Automatic Window Discovery:** The background monitor dynamically detects active Antigravity IDE windows via Win32 API.
-- **Dedicated Companions:** When you open 2 IDE windows, you get **2 distinct mascots** on your taskbar! 3 windows = 3 mascots!
+### 👥 Multi-Pet Engine (Strict 1:1 Lifecycle with Antigravity IDE Windows)
+- **Zero Distraction (0 Windows = 0 Pets):** When no Antigravity IDE windows are open, exactly 0 mascots are displayed, leaving your desktop 100% clean and transparent with zero background interference.
+- **Automatic Window Discovery:** When you launch Antigravity IDE, Coucou immediately discovers the new window and spawns its personal companion with a friendly greeting (*"👋 Ahoj!"*).
+- **Dedicated Companions for Multiple Windows:** When you open 2 IDE windows, you get **2 distinct mascots** on your taskbar! 3 windows = 3 mascots!
 - **Persistent Character Diversity:** Each window is assigned a different animal species (Panda, Penguin, Dog, Tiger, etc.) from an available pool, preventing visual duplicates.
 - **Staggered Taskbar Positioning:** Newly spawned companions walk alongside existing ones without overlapping.
 - **Clear Project Attribution:** Each mascot shows a project badge directly on its tag under its feet (e.g. `[● 🐼 Panda · 📁 coucou-main]`), shows a native tooltip on hover, announces its paired window in a speech bubble on double-click (*"🎯 Okno: coucou-main"*), and displays the project name in the chat header.
 - **Smart Badge Sanitization:** Automatically ignores open file names (`README.md`, `scraper.py`, `Cargo.toml`) and system words (`settings`, `coucou`), displaying only the genuine workspace/project name.
 - **Settings Window Exception:** Opening Settings (whether in Antigravity IDE, detached settings tab, or Coucou's settings window) **never** spawns an unwanted "setting" mascot and never overwrites an existing mascot's project name.
-- **Single-Pet Desktop Safeguard:** You will **never be left with 0 mascots**. If an IDE window closes or detaches when only one mascot is active, it unbinds its HWND and stays on the desktop as an idle companion, ready to be adopted when a window reopens.
-- **Window-Specific Focus & Chat:** Double-clicking any pet instantly brings that specific IDE window to the foreground (`SetForegroundWindow`). Right-clicking opens the chat overlay for that specific project.
-- **Graceful Window Exit:** When an additional IDE window is closed, its extra companion waves goodbye (*"👋 Měj se hezky!"*) and disappears, leaving your other companions active.
+- **1:1 Lifecycle Exit:** When an IDE window is closed, its companion waves goodbye (*"👋 Měj se hezky! Relace ukončena..."*), sparkles, and departs. When the last IDE window closes, 0 mascots remain on desktop.
+- **Window-Specific Focus:** Double-clicking any pet instantly brings that specific IDE window to the foreground (`SetForegroundWindow`). Right-clicking opens the chat overlay for that specific project.
 
-### 💬 Two-Way IDE Chat Mirror & Rock-Solid Prompt Injection (v0.1.2)
+### 💬 Two-Way IDE Chat Mirror & Headless Background Agent (Ghost Mode)
+- **Ghost Mode / Background Prompt Dispatch:** Type a prompt into the mascot while Antigravity IDE is minimized or behind other apps. The prompt is injected and Antigravity is immediately minimized back to the taskbar (`SW_MINIMIZE`), while your previous foreground application and focus are instantly restored within ~150ms. You can chat with your agent without the IDE popping up over your screen!
 - **Direct Windows UI Automation Target Focus (`IUIAutomation`):** Prompts submitted through the mascot chat overlay target the Antigravity chat input directly via OS-level Windows UI Automation (`ControlType::ComboBox`, `Name = "Message input"`).
 - **Zero Terminal Mis-Pastes:** Calling `SetFocus()` directly on the chat element forcefully transfers OS keyboard focus out of active integrated PowerShell terminals or editor tabs into the chat textarea. Prompts are **never accidentally typed or executed into the terminal**, even if the terminal had active focus before clicking the mascot!
 - **Exact Bounding Box Hit-Testing:** Automatically queries real-time physical screen coordinates and monitor DPI, ensuring synthetic click sequences land dead-center in the input box.
@@ -62,7 +63,6 @@
 - **Smart Scrolling & Floating Indicator:** Automatically aligns down upon arrival of new messages if you are at the bottom. If you scroll up to read past history, your position is preserved and an unobtrusive `⬇️ Nová zpráva` floating pill lets you jump down on demand.
 - **Incremental Fast Loading:** Loads the last 30 turns instantly, with an `⬆️ Load older history` button to prepend earlier turns without jumping.
 - **Live Background Sync:** Actively monitors the transcript file every 1.2s while open to stream in new responses in real-time, completely powering down when closed for 0.0% idle CPU.
-- **Ghost Mode / Background Prompt Dispatch:** Dispatches prompts directly into the agent input while preserving user clipboard content and window focus.
 
 ### 🎨 8 Handcrafted Retro Pixel-Art Mascots
 Rendered on an HTML5 canvas with crisp nearest-neighbor pixel scaling and dynamic color palettes:
@@ -187,7 +187,7 @@ npm run tauri dev
 
 ## 🧪 Automated Testing
 
-The project includes an automated test suite of **14 unit tests** in TypeScript and **13 unit tests** in Rust that validate multi-window assignment, session aliasing, settings suppression, single-pet safety guards, UI Automation focus injection, and prompt dispatch:
+The project includes an automated test suite of **14 unit tests** in TypeScript and **15 unit tests** in Rust that validate multi-window assignment, session aliasing, settings suppression, strict 1:1 window lifecycle, UI Automation focus injection, prompt dispatch, and auto-launch:
 
 ```powershell
 cd windows
@@ -209,11 +209,11 @@ Expected output:
 ✓ Test 9: Silent background prompt dispatch & clipboard preservation verified
 ✓ Test 10: Project badge accurately displays workspace ('📁 coucou-main') and filters out open files ('README.md')
 ✓ Test 11: Settings window exception verified: opening settings never spawns a 'setting' mascot (100% OK)
-✓ Test 12: Single pet preservation verified: mascot NEVER disappears when opening settings or unbinding window (100% OK)
-✓ Test 13: SessionEnd hook safeguard verified: last pet is NEVER removed on agent session stop (100% OK)
+✓ Test 12: Strict 1:1 window lifecycle verified: mascot removes when window closes (0 pets) & spawns on open (100% OK)
+✓ Test 13: SessionEnd hook lifecycle verified: mascot closes on SessionEnd & multiple-pet destruction works (100% OK)
 ✓ Test 14: Pet Companion Settings & Preferences verified: toggle preferences persist and reflect across pets (100% OK)
 
-ALL 14 MULTI-PET, CONVERSATION MIRROR & SAFEGUARD TESTS PASSED SUCCESSFULLY! (100% OK)
+ALL 14 MULTI-PET, CONVERSATION MIRROR, SETTINGS EXCEPTION & PET SETTINGS TESTS PASSED SUCCESSFULLY! (100% OK)
 ```
 
 ---
@@ -228,7 +228,7 @@ This project builds upon the fantastic original work of **Louis Raillé**:
 
 Windows Port & Antigravity IDE Enhancements:
 - Multi-Pet Engine (1 window = 1 pet, dynamic HWND discovery).
-- Single-Pet Safety Safeguard (never left with 0 pets on the desktop).
+- Strict 1:1 Window Lifecycle (0 IDE windows = 0 pets, dynamic HWND discovery, automatic spawn on open and clean exit on close).
 - Settings window exception and project badge sanitization.
 - Google Antigravity lifecycle hooks (`PreInvocation`, `PostInvocation`, `ask_question`).
 - Two-way prompt injection, Ghost Mode, and full transcript response mirroring.

@@ -188,7 +188,12 @@ fn focus_ide_window(hwnd: Option<isize>) -> Option<isize> {
             return Some(info.hwnd);
         }
     }
-    log::line("focus_ide_window: no active Antigravity IDE window found");
+    log::line("focus_ide_window: no active Antigravity IDE window found, launching IDE...");
+    if let Some(launched_h) = window_finder::launch_antigravity_ide(None, None) {
+        diagnostics::set_last_known_hwnd(launched_h);
+        window_finder::restore_and_focus(launched_h);
+        return Some(launched_h);
+    }
     None
 }
 
@@ -202,7 +207,7 @@ pub struct PromptResult {
 }
 
 #[tauri::command]
-fn send_ide_prompt(
+async fn send_ide_prompt(
     app: AppHandle,
     session_id: String,
     prompt: String,
@@ -221,28 +226,81 @@ fn send_ide_prompt(
         "prompt": prompt,
     }));
 
-    // Find best target window: provided hwnd, or auto-discovered Antigravity window
-    let target = if let Some(h) = hwnd.filter(|&v| v != 0 && window_finder::is_window_valid(v)) {
-        Some(h)
-    } else {
-        let mut proj_filter: Option<String> = None;
-        if let Some(manager) = app.try_state::<pet_manager::PetManager>() {
-            if let Some(sess) = manager.get_session(&session_id) {
-                proj_filter = sess.project_name.clone();
+    // Resolve project filter and workspace directory if known
+    let mut proj_filter: Option<String> = None;
+    let mut cwd: Option<String> = None;
+    if let Some(manager) = app.try_state::<pet_manager::PetManager>() {
+        if let Some(sess) = manager.get_session(&session_id) {
+            proj_filter = sess.project_name.clone();
+            cwd = sess.cwd.clone();
+        }
+        if cwd.is_none() {
+            for sess in manager.all_sessions() {
+                if let Some(c) = &sess.cwd {
+                    cwd = Some(c.clone());
+                    break;
+                }
             }
         }
-        window_finder::find_antigravity_window(None, proj_filter.as_deref())
-            .or_else(|| window_finder::find_antigravity_window(None, None))
-    };
+    }
 
-    let ok = window_finder::inject_prompt_to_ide(target.unwrap_or(0), &prompt);
-    let msg = if ok {
-        "Prompt byl vložen do chatu Antigravity a odeslán! 🚀".to_string()
-    } else {
-        "Prompt je připraven ve schránce (Ctrl+V) 📋".to_string()
-    };
+    let prompt_clone = prompt.clone();
+    let cwd_clone = cwd.clone();
+    let (target, ok, method, msg) = tokio::task::spawn_blocking(move || {
+        // Find best target window: provided hwnd, or auto-discovered Antigravity window
+        let existing_target = if let Some(h) = hwnd.filter(|&v| v != 0 && window_finder::is_window_valid(v)) {
+            Some(h)
+        } else {
+            window_finder::find_antigravity_window(None, proj_filter.as_deref())
+                .or_else(|| window_finder::find_antigravity_window(None, None))
+        };
 
-    let method = if ok { "ide_ui_injection" } else { "clipboard_fallback" };
+        if let Some(h) = existing_target {
+            let ok = window_finder::inject_prompt_to_ide(h, &prompt_clone);
+            let msg = if ok {
+                "Prompt byl vložen do chatu Antigravity a odeslán! 🚀".to_string()
+            } else {
+                "Prompt je připraven ve schránce (Ctrl+V) 📋".to_string()
+            };
+            let method = if ok { "ide_ui_injection" } else { "clipboard_fallback" };
+            (Some(h), ok, method, msg)
+        } else {
+            // Antigravity IDE is NOT open! Automatically launch it.
+            crate::log::line("send_ide_prompt: no active IDE window, automatically launching Antigravity IDE...");
+            if let Some(new_h) = window_finder::launch_antigravity_ide(cwd_clone.as_deref(), proj_filter.as_deref()) {
+                let mut ok = window_finder::inject_prompt_to_ide(new_h, &prompt_clone);
+                if !ok {
+                    std::thread::sleep(std::time::Duration::from_millis(1500));
+                    ok = window_finder::inject_prompt_to_ide(new_h, &prompt_clone);
+                }
+                let msg = if ok {
+                    "Antigravity IDE bylo spuštěno a prompt byl odeslán! 🚀".to_string()
+                } else {
+                    "Antigravity IDE bylo spuštěno. Prompt je připraven ve schránce (Ctrl+V) 📋".to_string()
+                };
+                let method = if ok { "ide_launch_and_inject" } else { "clipboard_fallback" };
+                (Some(new_h), ok, method, msg)
+            } else {
+                crate::log::line("send_ide_prompt: failed to launch or locate Antigravity IDE");
+                let _ = window_finder::set_clipboard_text(&prompt_clone);
+                let msg = "Nepodařilo se spustit Antigravity IDE. Prompt je ve schránce (Ctrl+V) 📋".to_string();
+                (None, false, "clipboard_fallback", msg)
+            }
+        }
+    })
+    .await
+    .unwrap_or_else(|e| {
+        log::line(format!("send_ide_prompt task error: {e}"));
+        (None, false, "error", format!("Chyba při odesílání promptu: {e}"))
+    });
+
+    // If window handle was discovered or launched, update pet session
+    if let Some(h) = target {
+        if let Some(manager) = app.try_state::<pet_manager::PetManager>() {
+            manager.ensure_session(&app, &session_id, cwd.as_deref(), Some(h), None);
+        }
+    }
+
     diagnostics::record_prompt_dispatch(
         &prompt,
         target,
@@ -707,6 +765,16 @@ fn set_pet_chat_expanded(app: AppHandle, window_label: String, expanded: bool) {
     pet_manager::set_chat_expanded(&app, &window_label, expanded);
 }
 
+#[tauri::command]
+fn get_active_sessions(app: AppHandle) -> Vec<pet_manager::PetSession> {
+    if let Some(m) = app.try_state::<pet_manager::PetManager>() {
+        pet_manager::sync_active_ide_windows(&app);
+        m.all_sessions().into_iter().map(|s| (*s).clone()).collect()
+    } else {
+        Vec::new()
+    }
+}
+
 /// Our own `where`: walks %PATH% against %PATHEXT%, no shell involved.
 /// Rust quotes arguments correctly for `.cmd`/`.bat` targets since 1.77, so
 /// spawning `code.cmd` directly is safe.
@@ -879,21 +947,13 @@ pub fn run() {
             )
         };
         if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
-            #[cfg(debug_assertions)]
-            {
-                use std::os::windows::process::CommandExt;
-                let our_pid = std::process::id();
-                let _ = std::process::Command::new("taskkill")
-                    .args(&["/F", "/IM", "coucou.exe", "/FI", &format!("PID ne {our_pid}")])
-                    .creation_flags(0x08000000)
-                    .output();
-                std::thread::sleep(std::time::Duration::from_millis(250));
-            }
-            #[cfg(not(debug_assertions))]
-            {
-                log::line("Another instance is already running; exiting cleanly.");
-                std::process::exit(0);
-            }
+            use std::os::windows::process::CommandExt;
+            let our_pid = std::process::id();
+            let _ = std::process::Command::new("taskkill")
+                .args(&["/F", "/IM", "coucou.exe", "/FI", &format!("PID ne {our_pid}")])
+                .creation_flags(0x08000000)
+                .output();
+            std::thread::sleep(std::time::Duration::from_millis(250));
         }
         h_mutex
     };
@@ -945,6 +1005,7 @@ pub fn run() {
             get_conversation_history,
             get_all_conversation_history,
             get_transcript_metadata,
+            get_active_sessions,
         ])
         .setup(move |app| {
             diagnostics::init();

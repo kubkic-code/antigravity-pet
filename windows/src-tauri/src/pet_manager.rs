@@ -69,36 +69,40 @@ impl PetManager {
     ) -> Option<Arc<PetSession>> {
         let mut guard = self.sessions.lock().unwrap();
         if let Some(existing) = guard.get(session_id) {
+            let hwnd_changed = hwnd.is_some() && existing.hwnd != hwnd;
             let proj = title
                 .map(|t| crate::window_finder::extract_project_name(t, cwd.or(existing.cwd.as_deref())))
                 .or_else(|| cwd.map(|c| crate::window_finder::extract_project_name("", Some(c))));
-            if let Some(p) = proj {
-                // EXCEPTION: Do not rename an existing project session to "Settings"
-                if !crate::window_finder::is_settings_name(&p) && existing.project_name.as_deref() != Some(&p) {
-                    let updated = Arc::new(PetSession {
-                        session_id: existing.session_id.clone(),
-                        window_label: existing.window_label.clone(),
-                        animal_id: existing.animal_id.clone(),
-                        hwnd: existing.hwnd.or(hwnd),
-                        cwd: cwd.map(String::from).or_else(|| existing.cwd.clone()),
-                        window_title: title.map(String::from).or_else(|| existing.window_title.clone()),
-                        project_name: Some(p.clone()),
-                        conversation_id: existing.conversation_id.clone(),
-                        hit_rect: existing.hit_rect.clone(),
-                        ignoring: existing.ignoring.clone(),
-                    });
-                    guard.insert(session_id.to_string(), updated.clone());
-                    let _ = app.emit(
-                        "session-updated",
-                        json!({
-                            "sessionId": session_id,
-                            "hwnd": updated.hwnd,
-                            "windowTitle": updated.window_title,
-                            "projectName": p,
-                        }),
-                    );
-                    return Some(updated);
-                }
+            let proj_changed = if let Some(ref p) = proj {
+                !crate::window_finder::is_settings_name(p) && existing.project_name.as_deref() != Some(p)
+            } else {
+                false
+            };
+            if hwnd_changed || proj_changed {
+                let new_proj = proj.or_else(|| existing.project_name.clone());
+                let updated = Arc::new(PetSession {
+                    session_id: existing.session_id.clone(),
+                    window_label: existing.window_label.clone(),
+                    animal_id: existing.animal_id.clone(),
+                    hwnd: hwnd.or(existing.hwnd),
+                    cwd: cwd.map(String::from).or_else(|| existing.cwd.clone()),
+                    window_title: title.map(String::from).or_else(|| existing.window_title.clone()),
+                    project_name: new_proj.clone(),
+                    conversation_id: existing.conversation_id.clone(),
+                    hit_rect: existing.hit_rect.clone(),
+                    ignoring: existing.ignoring.clone(),
+                });
+                guard.insert(session_id.to_string(), updated.clone());
+                let _ = app.emit(
+                    "session-updated",
+                    json!({
+                        "sessionId": session_id,
+                        "hwnd": updated.hwnd,
+                        "windowTitle": updated.window_title,
+                        "projectName": new_proj,
+                    }),
+                );
+                return Some(updated);
             }
             return Some(existing.clone());
         }
@@ -255,6 +259,8 @@ impl PetManager {
 /// and dynamically spawns or removes desktop pet companions.
 pub fn start_window_monitor(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
+        // Run first discovery immediately so currently open IDE windows are bound on startup
+        sync_active_ide_windows(&app);
         loop {
             tokio::time::sleep(Duration::from_millis(1500)).await;
             sync_active_ide_windows(&app);
@@ -262,7 +268,7 @@ pub fn start_window_monitor(app: AppHandle) {
     });
 }
 
-fn sync_active_ide_windows(app: &AppHandle) {
+pub fn sync_active_ide_windows(app: &AppHandle) {
     let Some(manager) = app.try_state::<PetManager>() else { return };
     let discovered = crate::window_finder::enumerate_all_ide_windows();
 
@@ -314,12 +320,25 @@ fn sync_active_ide_windows(app: &AppHandle) {
                 ));
                 continue;
             }
-            let session_id = format!("ide-win-{:x}", info.hwnd);
-            log::line(format!(
-                "discovered new Antigravity IDE window: hwnd=0x{:X} pid={} title='{}'",
-                info.hwnd, info.pid, info.title
-            ));
-            manager.ensure_session(app, &session_id, None, Some(info.hwnd), Some(&info.title));
+            // Check if there is an unattached idle pet session on desktop (hwnd is None)
+            let unattached = {
+                let guard = manager.sessions.lock().unwrap();
+                guard.values().find(|s| s.hwnd.is_none()).cloned()
+            };
+            if let Some(idle_sess) = unattached {
+                log::line(format!(
+                    "binding discovered IDE window (hwnd=0x{:X}, title='{}') to idle pet session '{}'",
+                    info.hwnd, info.title, idle_sess.session_id
+                ));
+                manager.ensure_session(app, &idle_sess.session_id, None, Some(info.hwnd), Some(&info.title));
+            } else {
+                let session_id = format!("ide-win-{:x}", info.hwnd);
+                log::line(format!(
+                    "discovered new Antigravity IDE window: hwnd=0x{:X} pid={} title='{}'",
+                    info.hwnd, info.pid, info.title
+                ));
+                manager.ensure_session(app, &session_id, None, Some(info.hwnd), Some(&info.title));
+            }
         }
     }
 

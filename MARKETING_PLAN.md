@@ -1,7 +1,3 @@
-
-
-ahoj přečti si všechny md nejdřív. nějak mi nefunguje to napojení zvířátka na ten chat. poslal jsem neco zviratku ale do chatu se to nedostalo
-
 # 🚀 Marketingový Plán: Antigravity Pet (Windows)
 
 > **Cíl plánu:** Dostat aplikaci mezi tisíce vývojářů po celém světě, vybudovat komunitu fanoušků na GitHubu a využít tuto pozornost jako odrazový můstek pro tvé další projekty.
@@ -14,7 +10,7 @@ ahoj přečti si všechny md nejdřív. nějak mi nefunguje to napojení zvíř�
 * **Emocionální & Nostalgický magnet:** Vývojáři tráví 8–12 hodin denně před monitorem. Nástroje jako *VS Code Pets* (1 000 000+ instalací) nebo *Desktop Goose* dokázaly, že lidé milují virtuální společníky na ploše.
 * **Jízda na AI vlně:** Google Antigravity a Claude Code zažívají obrovský rozmach. Vývojáři aktivně vyhledávají pluginy, motivy a doplňky.
 * **Prázdná díra na trhu (Windows):** Původní projekt Coucou/NotchBuddy existoval výhradně pro macOS a MacBook Notch. Windows komunita (více než 70 % trhu) byla dosud zcela opomenuta.
-* **Reálná funkční hodnota:** Není to jen dekorace — vizualizuje myšlení AI agenta v reálném čase (kódování, schvalování změn, dokončení úkolu), nabízí obousměrné zrcadlo chatu a autentické 8-bitové zvukové efekty.
+* **Reálná funkční hodnota (Headless Agent & Ghost Mode):** Není to jen dekorace — vizualizuje myšlení AI agenta v reálném čase, umožňuje ovládat agenta čistě na pozadí (Ghost Mode: prompt se předá do Antigravity bez otevírání okna a bez vyrušení uživatele), nabízí obousměrné zrcadlo chatu a autentické 8-bitové zvukové efekty.
 
 ---
 

@@ -17,11 +17,15 @@
 
 ## 🌟 Hlavní funkce v kostce
 - **8 unikátních pixel-art zvířátek** s plynulými retro animacemi (chůze, přemýšlení 🤔, psaní na notebooku 💻, oslava 🎉).
-- **Multi-Pet Engine (1 okno = 1 zvířátko):** Otevřete-li v Antigravity IDE další okno nebo projekt, **na liště se automaticky objeví nový parťák** s jiným zvířecím druhem! Původní zvířátko se nikdy nemění ani nenahrazuje.
-- **Bezpečnostní pojistka (nikdy 0 zvířátek):** Na ploše vám **nikdy nezmizí všechna zvířátka**. Pokud zavřete okno IDE a na ploše je jediné zvířátko, zůstane jako volný společník a při otevření dalšího okna se k němu automaticky přiřadí.
+- **Multi-Pet Engine (Striktní 1:1 životní cyklus s okny Antigravity IDE):**
+  - **0 oken Antigravity = 0 zvířátek:** Pokud nemáte otevřené žádné Antigravity IDE, na ploše se nezobrazuje žádné zvířátko a plocha zůstává zcela čistá.
+  - **Otevření Antigravity:** Jakmile otevřete Antigravity IDE, na liště se okamžitě objeví váš zvířecí pomocník a pozdraví vás.
+  - **Více oken = více zvířátek:** Otevřete-li v IDE další okno nebo projekt, na liště se automaticky objeví nový parťák s jiným zvířecím druhem a štítkem projektu. Původní zvířátka se nikdy nemění ani nenahrazují.
+  - **Zavření okna IDE:** Jakmile okno IDE zavřete, jeho zvířátko se rozloučí (*„👋 Měj se hezky! Relace ukončena...“*), zamává a elegantně odejde. Pokud zavřete i poslední okno, na ploše nezůstane žádné zvířátko.
 - **Výjimka pro Nastavení (Settings):** Otevření okna Nastavení (v IDE, v záložce nebo v nastavení Coucou) **nikdy nevytvoří falešné zvířátko „setting“** a nikdy neodstraní vaše stávající zvířátko.
 - **Čisté štítky projektů:** Pod zvířátkem se zobrazuje skutečný název projektu/složky (např. `📁 coucou-main`), otevřené soubory (`README.md`, `scraper.py`) jsou inteligentně odfiltrovány.
-- **Obousměrné zrcadlo (Chat Overlay) & Tichý režim (Ghost Mode):** Zrcadlí celou historii chatu z IDE v reálném čase a umožňuje posílat prompty přímo z plochy na pozadí, aniž by se okno IDE muselo otevírat nebo kradlo focus z prohlížeče.
+- **Obousměrné zrcadlo (Chat Overlay) & Tichý režim (Ghost Mode):** Zrcadlí celou historii chatu z IDE v reálném čase a umožňuje posílat prompty přímo z plochy na pozadí, aniž by se okno IDE muselo otevírat nebo kradlo focus z prohlížeče. Okno Antigravity po odeslání zůstává minimalizované na liště (`SW_MINIMIZE`) a váš původní fokus okna je okamžitě obnoven!
+- **Dvojklik na zvířátko:** Pokud chcete Antigravity okno přivolat do popředí na celou obrazovku, stačí na zvířátko dvakrát kliknout.
 - **Bohatý autonomní život s prodlouženými animacemi (6–8,5 s):** Zvířátka v klidu tancují na retro 8-bitový beat 🎧, pískají si do kroku 🎶, dávají si kávu ☕, šlofíka 💤, svačinku 🍴, rozcvičku 🧘, loví brouky 🐛 nebo kýchají 🤧.
 - **0 % CPU v klidu & ~25 MB RAM:** Extrémně lehká desktopová aplikace postavená na Tauri v2 a Rustu.
 - **Průhledné klikací plátno:** Můžete klikat na zvířátka, přetahovat je myší a otevírat chat – všechno ostatní na obrazovce zůstává plně průchozí (`click-through`).
@@ -139,25 +143,28 @@ Okno chatu je přímým a kompletním mostem mezi vaší plochou a agentem v Ant
   - Volání `SetFocus()` přímo přenese klávesový fokus z integrovaného terminálu nebo editoru rovnou do chatu agenta.
   - Text promptu se **nikdy nenapíše do terminálu ani do kódu**, i když jste před kliknutím na zvířátko pracovali v terminálu či jiné aplikaci!
   - Využívá přesné fyzické souřadnice ovládacího prvku nezávisle na rozlišení či DPI monitoru (FullHD, 2K, 4K).
-- Můžete psát agentovi čistě přes zvířátko, zatímco jste třeba na webu v Google Chrome – okno IDE vás nemusí vyrušit v popředí.
-- Zvířátko začne ihned pilně kódovat na notebooku 💻.
+- **Tichý režim (Ghost Mode):**
+  - Můžete psát agentovi čistě přes zvířátko, zatímco jste třeba na webu v Google Chrome nebo píšete v editoru.
+  - Okno IDE se po odeslání promptu okamžitě minimalizuje zpět na hlavní panel (`SW_MINIMIZE`) a systém ihned vrátí fokus na okno, ve kterém jste předtím pracovali. Okno IDE vám tak nikdy neskáče do rozpracované práce ani nezakrývá monitor.
+  - Zvířátko začne ihned pilně kódovat na notebooku 💻 a v chatu i bublinách vidíte jeho myšlenky a postup.
+  - **Dvojklik na zvířátko:** Kdykoliv budete chtít IDE otevřít a zaměřit na celou obrazovku, stačí na zvířátko dvakrát kliknout myší.
 
 ---
 
-## 👥 Multi-Pet Engine (1 okno = 1 zvířátko)
+## 👥 Multi-Pet Engine (Striktní 1:1 životní cyklus s okny Antigravity IDE)
 
-1. **Více oken najednou (2 okna = 2 zvířátka, 3 okna = 3 zvířátka):**
+1. **Více oken najednou (1 okno = 1 zvířátko, 2 okna = 2 zvířátka, 3 okna = 3 zvířátka):**
    - Jakmile otevřete nové okno Antigravity IDE, Coucou ho ihned detekuje.
    - Původní zvířátko se **NIKDY nenahrazuje ani nemění za jiné**!
    - Vedle něj na hlavní liště se narodí **nové samostatné zvířátko** s jiným druhem (Panda, Tučňák, Pejsek, Tygřík atd.) a rozestoupí se tak, aby se nepřekrývala.
 2. **Přehledné štítky a rozpoznání oken:**
    - **Jmenovka pod zvířátkem (`🏷️`):** Ukazuje název projektu (např. `[● 🐼 Panda · 📁 coucou-main]`).
    - **Tooltip při najetí myší (Hover):** Ukáže spárovaný projekt a nápovědu.
-   - **Dvojklik na zvířátko:** Radostně poskočí (`🎯 ✨`), potvrdí okno (*„🎯 Okno: coucou-main“*) a okamžitě ho zaměří.
+   - **Dvojklik na zvířátko:** Radostně poskočí (`🎯 ✨`), potvrdí okno (*„🎯 Okno: coucou-main“*) a okamžitě ho zaměří a přenese do popředí.
    - **Záhlaví chatu:** Uvádí přesný název spárovaného projektu.
-3. **Zavření okna IDE & Bezpečnostní pojistka:**
-   - Když jedno z několika oken zavřete, jeho zvířátko se rozloučí a odejde.
-   - **Pokud zavřete poslední okno, poslední zvířátko NIKDY nezmizí.** Zůstává na ploše jako volný společník a čeká na další otevření projektu.
+3. **Zavření okna IDE (Striktní 1:1 životní cyklus):**
+   - Když jakékoliv okno IDE zavřete, jeho zvířátko se rozloučí (*„👋 Měj se hezky! Relace ukončena...“*), zamává a elegantně odejde.
+   - **Když zavřete i poslední okno IDE, na ploše nezůstává žádné zvířátko.** Plocha je čistá a aplikace čeká na otevření nového projektu v Antigravity IDE.
 4. **Výjimka pro Nastavení:**
    - Otevření okna Nastavení (v IDE, záložce nebo v Coucou) **nikdy nevytvoří zvířátko „setting“** a nikdy neodstraní vašeho stávajícího parťáka.
 
@@ -191,7 +198,7 @@ Tento projekt vznikl díky skvělé práci původního autora:
 
 Windows Port & Antigravity IDE Enhancements:
 - Multi-Pet Engine pro více oken současně (1 okno = 1 unikátní zvířátko).
-- Pojistka proti ztrátě zvířátka na ploše a výjimka pro okna Nastavení.
+- Striktní 1:1 životní cyklus s okny Antigravity IDE (0 oken = 0 zvířátek, čistý odchod při zavření) a výjimka pro okna Nastavení.
 - Obousměrný chat mirror a tichá injekce promptů do Antigravity IDE na pozadí (Ghost Mode).
 - Automatická detekce událostí agenta (kódování, přemýšlení, otázky `ask_question`, dokončení).
 - 8 plně animovaných retro pixel-art zvířátek, prodloužené autonomní animace a 4px režim soustředění na liště.

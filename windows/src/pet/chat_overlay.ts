@@ -1114,7 +1114,11 @@ export class ChatOverlay {
     // Put mascot into working state and update chat status
     this.updateStatus("working");
     this.pet.setState("working");
-    this.pet.showBubble("💻 Kóduji", text.slice(0, 50), 5000);
+    if (!this.hwnd && !this.pet.hwnd) {
+      this.pet.showBubble("🚀 Spouštím IDE", "Otevírám Antigravity...", 8000);
+    } else {
+      this.pet.showBubble("💻 Kóduji", text.slice(0, 50), 5000);
+    }
 
     // Capture pre-send state to accurately identify NEW assistant responses
     const preSendMsgCount = this.messages.length;
@@ -1126,6 +1130,7 @@ export class ChatOverlay {
       if (res?.targetHwnd) {
         this.hwnd = res.targetHwnd;
         this.pet.hwnd = res.targetHwnd;
+        this.pet.showBubble("💻 Kóduji", text.slice(0, 50), 5000);
       }
       if (res) {
         const targetHex = res.targetHwnd ? "0x" + res.targetHwnd.toString(16).toUpperCase() : "(auto)";

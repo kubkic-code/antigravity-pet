@@ -11,8 +11,16 @@
 
 ### Core Capabilities:
 - **8 Retro 8-bit Pixel-Art Mascots:** Panda, Penguin, Cat, Elephant, Fox, Monkey, Dog, Tiger. Rendered dynamically via 20x20 matrix generators on an HTML5 canvas with crisp nearest-neighbor scaling.
-- **Multi-Pet Engine (1 Window = 1 Mascot):** When multiple windows or workspaces are opened in Antigravity IDE, **a distinct companion automatically spawns on the taskbar for each window**. Mascots never replace each other; existing pets are strictly preserved.
-- **Zero-Pet Desktop Safeguard:** A user is **never left with 0 mascots on the desktop**. If only 1 pet remains and its window closes or detaches, it unbinds its HWND and stays on the desktop as an idle companion, and is automatically adopted when a window reopens.
+- **Multi-Pet Engine (Strict 1:1 Lifecycle with Antigravity IDE Windows):**
+  - **0 IDE Windows = 0 Desktop Mascots:** When starting Coucou without an open Antigravity IDE, exactly 0 mascots are spawned. The transparent canvas stays 100% click-through with zero visual clutter.
+  - **Automatic Spawning on Open:** Opening an Antigravity IDE window immediately spawns its assigned companion, which greets the user (*"👋 Ahoj! Jsem tvůj pomocník [zvířátko] pro [projekt]!"*).
+  - **Multi-Window 1:1 Mapping:** Each additional IDE window gets its own distinct mascot companion (Panda, Penguin, Dog, Tiger, etc.) with a dedicated project tag.
+  - **Clean Exit on Window Close:** When an IDE window is closed, its mascot waves goodbye (*"👋 Měj se hezky! Relace ukončena..."*), sparkles, fades out, and is cleanly destroyed. When the last window is closed, exactly 0 mascots remain on desktop.
+- **Headless Agent & Ghost Mode (Stealth Background Prompt Injection):**
+  - Submitting prompts from the desktop mascot chat overlay injects directly into the Antigravity agent (Ctrl+L, Ctrl+V, Enter).
+  - If the IDE is minimized or behind other apps (`was_iconic || _prev_foreground != target_hwnd`), it immediately minimizes back to the taskbar (`ShowWindow(target_hwnd, SW_MINIMIZE)`) within ~150ms and restores the user's previous foreground window/focus.
+  - The user can prompt their AI agent seamlessly while working in Chrome, terminals, or other apps without the IDE popping up over their screen.
+  - **Double-Click to Focus:** Double-clicking any pet intentionally restores and focuses that specific Antigravity IDE window to the foreground (`focusIdeWindow` / `restore_and_focus`).
 - **Settings Window Exception & Preservation:** Opening Settings (in IDE, detached tab, or Coucou settings window) **never** spawns a "setting" mascot, never overwrites an existing pet project tag, and never removes the pet.
 - **Clear Multi-Window Project Attribution:**
   1. Non-interactive name tag docked under feet: `[● Panda x 📁 coucou-main]`.
@@ -68,11 +76,11 @@ windows/
 |   +-  pack.mjs                 # Post-build distribution bundler
 |
 +-  src/
-|   +-  main.ts                  # Multi-pet registry, boot, sound preload, hit-rect push, last-pet safety guard (session-removed AND SessionEnd)
+|   +-  main.ts                  # Multi-pet registry, boot, sound preload, hit-rect push, strict 1:1 lifecycle (0 pets on 0 IDE windows, spawn on open, goodbye on close)
 |   +-  style.css                # Base reset and transparent canvas styles
 |   |
 |   +-  core/
-|   |   +-  bridge.ts            # Typed Tauri IPC invokes (setIslandRects, focusIdeWindow, sendIdePrompt, etc.)
+|   |   +-  bridge.ts            # Typed Tauri IPC invokes (setIslandRects, focusIdeWindow, sendIdePrompt, getActiveSessions, etc.)
 |   |   +-  dom.ts               # Lightweight DOM helpers (h, svg, clear, dot)
 |   |   +-  hooks.ts             # Ingests Antigravity IDE events and updates State
 |   |   +-  sound.ts             # Web Audio API engine (8-bit beats, 2-phrase whistling, sips, crunches, naps)
@@ -93,10 +101,10 @@ windows/
 +-  src-tauri/
 |   +-  Cargo.toml               # Minimal dependencies: tauri 2.x, tokio, serde, windows-rs
 |   +-  src/
-|       +-  lib.rs               # Tauri app builder, commands (prompt dispatch, diagnostics), tray
+|       +-  lib.rs               # Tauri app builder, commands (prompt dispatch, get_active_sessions, diagnostics), tray
 |       +-  island.rs            # Fullscreen transparent overlay, monitor detection, Win32 cursor click-through
 |       +-  pet_manager.rs       # Session manager, window monitor (1.5s loop), settings filtering, liveness checks
-|       +-  window_finder.rs     # Win32 HWND enumeration, is_window_ide_process, extract_project_name, restore_and_focus
+|       +-  window_finder.rs     # Win32 HWND enumeration, Ghost Mode SW_MINIMIZE, restore_and_focus, auto-launch, 15 unit tests
 |       +-  diagnostics.rs       # In-memory diagnostics logger, IDE window tracking, markdown report generator
 |       +-  pipe.rs              # Win32 Named Pipe server (\\.\pipe\coucou-<SID>)
 |       +-  hooks.rs             # Antigravity hooks config generator (~/.gemini/config/hooks.json)
@@ -160,14 +168,14 @@ Specific companion animates + speech bubble + chat overlay sync + diagnostics lo
   - Standalone Settings windows are skipped in the `else` branch of `sync_active_ide_windows` (`is_settings_window`), preventing spawning a "setting" mascot.
   - For existing pet sessions, switching tabs to Settings does NOT rename the project (`is_settings_name`).
   - Closed window tracking (`to_remove`) verifies `(discovered.iter().any(|d| d.hwnd == h) || is_window_ide_process(h)) && is_window_valid(h)` to ensure that opening settings never marks an existing IDE window as dead.
-  - In `main.ts`, both `session-removed` AND `SessionEnd` hook events check `if (uniquePets.length <= 1) return;` so the user is never left with 0 pets on the desktop.
+  - In `main.ts`, both `session-removed` AND `SessionEnd` hook events cleanly remove the mascot (`sayGoodbyeAndClose`, `activePets.delete`), ensuring a strict 1:1 lifecycle: 0 IDE windows = 0 desktop pets.
 
-### 3. Two-Way Prompt Injection Contract (v0.1.2 Rock-Solid UIA Architecture):
+### 3. Two-Way Prompt Injection Contract (v0.1.2 Rock-Solid UIA Architecture & Ghost Mode):
 When a user submits a prompt via the desktop chat overlay (`chat_overlay.ts`):
-1. `Bridge.sendIdePrompt(hwnd, text)` calls Tauri command `send_ide_prompt` in `lib.rs`.
-2. Rust backend resolves the target HWND (`window_finder::find_antigravity_window`).
-3. Backs up user's original clipboard content and mouse cursor position.
-4. Elevates the target Antigravity IDE window to the top of the Z-order (`SetWindowPos HWND_TOP`, `BringWindowToTop`, `SetForegroundWindow`, `AttachThreadInput`, `AllowSetForegroundWindow(0xFFFFFFFF)`, Alt-key pulse).
+1. `Bridge.sendIdePrompt(hwnd, text)` calls Tauri command `send_ide_prompt` in `lib.rs` (dispatched asynchronously on a background blocking thread).
+2. Rust backend resolves the target HWND (`window_finder::find_antigravity_window` or auto-launches Antigravity executable if not yet open).
+3. Backs up user's original clipboard content, mouse cursor position, and foreground window (`_prev_foreground`).
+4. Elevates the target Antigravity IDE window (`SetWindowPos HWND_TOP`, `BringWindowToTop`, `SetForegroundWindow`, `AttachThreadInput`, `AllowSetForegroundWindow(0xFFFFFFFF)`, Alt-key pulse).
 5. **Direct Windows UI Automation Focus (`find_and_focus_chat_input_via_uia`):**
    - Connects to Windows UI Automation via native COM (`IUIAutomation`, `CUIAutomation`).
    - Searches for the chat textarea ComboBox (`ControlType::ComboBox` with `Name = "Message input"`).
@@ -178,9 +186,15 @@ When a user submits a prompt via the desktop chat overlay (`chat_overlay.ts`):
    - Injects mouse click sequence to establish Chromium webview user activation.
 7. **Prompt Submission:**
    - Dispatches `Ctrl+A` (clears existing draft/placeholder), `Ctrl+V` (pastes prompt), and `VK_RETURN` (Enter to submit to agent).
-8. **Restoration:**
+8. **Restoration & Ghost Mode Minimization:**
    - Immediately returns user mouse cursor to original position.
    - Cleans up thread input attachment and restores original clipboard content after 1500ms.
+   - **Ghost Mode Stealth Background Execution:** If the IDE was minimized or in the background before injection (`was_iconic || _prev_foreground != target_hwnd`):
+     - Waits ~150ms for Electron's message queue to accept the Enter submission.
+     - Calls `ShowWindow(target_hwnd, SW_MINIMIZE)` to immediately tuck the IDE window back down to the taskbar.
+     - Calls `SwitchToThisWindow(_prev_foreground, true.into())` and `SetForegroundWindow(_prev_foreground)` to restore the user's active application and keyboard focus.
+     - The user never experiences window flashing or focus stealing.
+   - **Double-Click Foreground Trigger:** If the user ever wants to view the IDE, double-clicking the mascot calls `focusIdeWindow(this.hwnd)`, which executes `restore_and_focus(hwnd)`.
 
 ---
 
@@ -226,7 +240,7 @@ Node.js and Cargo are installed in user/system directories (`%USERPROFILE%\.carg
 ```powershell
 node scripts/test_multi_pet.mjs
 ```
-*Tests cover: initial mascot preservation, multi-window staggered spawning, distinct species assignment, HWND event aliasing, single-window cleanup, project attribution integrity, full conversation transcript mirroring, silent prompt dispatch, settings window exception, single-pet desktop preservation, **SessionEnd hook safeguard**, and **Pet Companion Settings & Preferences**.*
+*Tests cover: initial mascot preservation, multi-window staggered spawning, distinct species assignment, HWND event aliasing, single-window cleanup, project attribution integrity, full conversation transcript mirroring, silent prompt dispatch, settings window exception, strict 1:1 window lifecycle (0 pets on close), **SessionEnd hook lifecycle**, and **Pet Companion Settings & Preferences**.*
 
 ### 2. Verify TypeScript & Build Frontend:
 ```powershell
@@ -234,12 +248,12 @@ $env:PATH += ";$env:USERPROFILE\.cargo\bin"; npm run build
 ```
 *Compiles `coucou-hook` release binary, runs `tsc --noEmit` and builds `vite` dist in ~250ms with 0 errors.*
 
-### 3. Verify Rust Backend & Unit Tests (13/13 tests):
+### 3. Verify Rust Backend & Unit Tests (15/15 tests):
 ```powershell
 $env:PATH += ";$env:USERPROFILE\.cargo\bin"; cargo test --manifest-path src-tauri\Cargo.toml -- --test-threads=1
 $env:PATH += ";$env:USERPROFILE\.cargo\bin"; cargo check --manifest-path src-tauri\Cargo.toml
 ```
-*Runs all 13 backend unit tests (including UIA COM discovery) with 100% green output.*
+*Runs all 15 backend unit tests (including UIA COM discovery, CLI discovery, and auto-launch) with 100% green output.*
 
 ### 4. Build and Deploy Hook Binary:
 ```powershell
@@ -251,14 +265,16 @@ Copy-Item -Force target\release\coucou-hook.exe "$env:LOCALAPPDATA\Coucou\bin\co
 
 ## 6. Critical Rules of Engagement for Future AI Agents
 
-1. **Never Leave 0 Mascots on the Desktop:** The last remaining companion is sacred. When all IDE windows close or unbind, the last pet simply clears its HWND and stays on the desktop as an idle companion. This is enforced in **two places** in `main.ts`: the `session-removed` event handler AND the `SessionEnd` hook event branch — both check `if (uniquePets.length <= 1) return;`.
-2. **Never Break Click-Through:** Every new interactive element added to the DOM must have its bounding rect included in `pushAllHitRects()` (`main.ts`) so Tauri can register it with `set_island_rects`. Any pixel not registered MUST pass clicks through to Windows (`WS_EX_TRANSPARENT`). Note: hit-rect is pushed from per-pet `requestAnimationFrame` loops — no extra `setInterval` needed.
-3. **Never Break Multi-Pet Preservation:** Never replace an existing mascot when a new window or session is opened. Always use `getOrCreatePet()` which respects HWND aliasing and preserves the mascot's assigned species.
-4. **Never Break Preemption:** Agent activities (`working` / `thinking`) must strictly take precedence over idle activities (nap, coffee, dance, snack, whistling). Always ensure `setState("working")` cancels pending activity timeouts and mutes music (`Sound.stopAllMelodies()`). The melody-stop condition in `setState()` covers both `"dance"` and `"walk"` (whistling) as source states.
-5. **Preserve Zero-CPU Idle Architecture:** Never use continuous unconstrained `requestAnimationFrame` loops when the mascot is stationary. When idle, physics loops must sleep. Auto-suspend Web Audio contexts when silent.
-6. **No Bloated Frameworks:** Maintain the ultra-fast, zero-dependency vanilla TypeScript + HTML5 canvas architecture. Do NOT inject heavy UI libraries (React, Vue, Tailwind) into the overlay frontend.
-7. **Always Maintain Test Suite:** Run `node scripts/test_multi_pet.mjs` and `cargo test` after modifying any multi-pet, session, or window-tracking code. All **14 multi-pet tests** and **13 Rust tests** must pass 100%.
-8. **`isSettingsName`/`isSettingsWindow` are intentionally triplicated** across `src/main.ts`, `scripts/test_multi_pet.mjs`, and `src-tauri/src/window_finder.rs`. Look for the `KEEP IN SYNC` comments in each file. If you add a new locale variant (e.g. German "einstellungen"), update **all three** locations.
+1. **Strict 1:1 Window Lifecycle with Antigravity IDE (0 Windows = 0 Desktop Pets):** When no Antigravity IDE windows are open, exactly 0 mascots are on the desktop. When an Antigravity window opens, its companion spawns immediately and greets the user. When an IDE window is closed, its companion waves goodbye (*"👋 Měj se hezky!"*), fades out, and is destroyed. When the last IDE window closes, 0 mascots remain on desktop.
+2. **Preserve Ghost Mode & Focus Restoration:** Prompt injection into Antigravity IDE must never steal user focus or leave the IDE covering the user's active window. If the IDE was minimized or in background, always minimize it back to the taskbar (`ShowWindow(target_hwnd, SW_MINIMIZE)`) and restore the user's previous foreground window (`_prev_foreground`) within ~150ms.
+3. **Double-Click Intentionally Restores IDE Window:** Double-clicking any pet calls `focusIdeWindow(hwnd)` / `restore_and_focus(hwnd)` to bring that specific IDE window to the foreground on demand.
+4. **Never Break Click-Through:** Every new interactive element added to the DOM must have its bounding rect included in `pushAllHitRects()` (`main.ts`) so Tauri can register it with `set_island_rects`. Any pixel not registered MUST pass clicks through to Windows (`WS_EX_TRANSPARENT`). Note: hit-rect is pushed from per-pet `requestAnimationFrame` loops — no extra `setInterval` needed.
+5. **Never Break Multi-Pet Preservation:** Never replace an existing mascot when a new window or session is opened. Always use `getOrCreatePet()` which respects HWND aliasing and preserves the mascot's assigned species.
+6. **Never Break Preemption:** Agent activities (`working` / `thinking`) must strictly take precedence over idle activities (nap, coffee, dance, snack, whistling). Always ensure `setState("working")` cancels pending activity timeouts and mutes music (`Sound.stopAllMelodies()`). The melody-stop condition in `setState()` covers both `"dance"` and `"walk"` (whistling) as source states.
+7. **Preserve Zero-CPU Idle Architecture:** Never use continuous unconstrained `requestAnimationFrame` loops when the mascot is stationary. When idle, physics loops must sleep. Auto-suspend Web Audio contexts when silent.
+8. **No Bloated Frameworks:** Maintain the ultra-fast, zero-dependency vanilla TypeScript + HTML5 canvas architecture. Do NOT inject heavy UI libraries (React, Vue, Tailwind) into the overlay frontend.
+9. **Always Maintain Test Suite:** Run `node scripts/test_multi_pet.mjs` and `cargo test` after modifying any multi-pet, session, or window-tracking code. All **14 multi-pet tests** and **15 Rust tests** must pass 100%.
+10. **`isSettingsName`/`isSettingsWindow` are intentionally triplicated** across `src/main.ts`, `scripts/test_multi_pet.mjs`, and `src-tauri/src/window_finder.rs`. Look for the `KEEP IN SYNC` comments in each file. If you add a new locale variant (e.g. German "einstellungen"), update **all three** locations.
 
 ---
 
